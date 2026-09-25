@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: ecosupply-contratos
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.7
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ACTION_PASSWORD
+        value: "123456"
+      - key: ADMIN_USER
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ecosupply-contratos-db
+          property: connectionString
+
+databases:
+  - name: ecosupply-contratos-db
+    databaseName: ecosupply_contratos
+    user: ecosupply
