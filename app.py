@@ -460,7 +460,45 @@ def atualizar_status(id):
 @app.route('/')
 @login_required
 def index():
- c=con(); rr=c.execute("select count(*) as total from contratos where status='PENDENTE'").fetchone(); total=rr['total']; c.close(); return render_template('index.html',total=total)
+ c=con(); rows=c.execute('select * from contratos order by id desc').fetchall(); c.close()
+ rows=[dict(r) for r in rows]
+ counts={s:0 for s in STATUS_OPTS}
+ for r in rows: counts[r.get('status') or 'PENDENTE']=counts.get(r.get('status') or 'PENDENTE',0)+1
+ kpis={'total':len(rows),'pendente':counts.get('PENDENTE',0),'elaboracao':counts.get('EM ELABORAÇÃO',0),'assinatura':counts.get('AGUARDANDO ASSINATURA',0),'ativo':counts.get('ATIVO',0),'cancelado':counts.get('CANCELADO',0)}
+ now=datetime.now()
+ for r in rows:
+  try:
+   dt=datetime.fromisoformat(r.get('criado_em') or '')
+   r['dias']=max(0,(now-dt).days); r['data_br']=dt.strftime('%d/%m/%Y')
+  except:
+   r['dias']=0; r['data_br']=r.get('criado_em') or '-'
+ atencao=[r for r in rows if r.get('status') not in ('ATIVO','CANCELADO')]
+ atencao=sorted(atencao,key=lambda x:x.get('dias',0),reverse=True)[:6]
+ recentes=rows[:8]
+ branch={'ECO CAMPO GRANDE':0,'ECO CUIABA':0,'ECONORTE':0}
+ for r in rows:
+  f=(r.get('faturado_por') or '').upper()
+  if 'CAMPO' in f: branch['ECO CAMPO GRANDE']+=1
+  elif 'NORTE' in f or 'SINOP' in f: branch['ECONORTE']+=1
+  elif 'CUIABA' in f or 'CUIABÁ' in f: branch['ECO CUIABA']+=1
+ mx=max(branch.values()) if branch and max(branch.values()) else 1
+ filiais=[{'nome':k,'total':v,'pct':round(v/mx*100)} for k,v in branch.items()]
+ months=[]
+ for i in range(11,-1,-1):
+  y=now.year; m=now.month-i
+  while m<=0: m+=12; y-=1
+  months.append((y,m))
+ month_counts={x:0 for x in months}
+ for r in rows:
+  try:
+   d=datetime.fromisoformat(r.get('criado_em') or ''); key=(d.year,d.month)
+   if key in month_counts: month_counts[key]+=1
+  except: pass
+ meses=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
+ month_chart={'labels':[f'{meses[m-1]}/{str(y)[2:]}' for y,m in months],'values':[month_counts[x] for x in months]}
+ status_order=['PENDENTE','EM ELABORAÇÃO','CONTRATO GERADO','AGUARDANDO ASSINATURA','ATIVO','CANCELADO']
+ status_chart={'labels':[x.title() for x in status_order],'values':[counts.get(x,0) for x in status_order]}
+ return render_template('index.html',kpis=kpis,atencao=atencao,recentes=recentes,filiais=filiais,status_chart=status_chart,month_chart=month_chart)
 @app.route('/novo',methods=['GET','POST'])
 @login_required
 def novo():

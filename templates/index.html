@@ -1,1 +1,40 @@
-{% extends 'base.html' %}{% block body %}<div class="card"><h2>Gestão de Contratos</h2><p>Importe a CAPA preenchida, confira os dados, salve a pendência e acompanhe o contrato pelos status.</p><a class="btn" href="{{url_for('novo')}}">Importar CAPA</a> <a class="btn light" href="{{url_for('pendencias')}}">Ver contratos / pendências ({{total}})</a></div><div class="card"><h3 class="section-title">Fluxo de status</h3><div class="flow"><span>PENDENTE</span><b>→</b><span>EM ELABORAÇÃO</span><b>→</b><span>CONTRATO GERADO</span><b>→</b><span>AGUARDANDO ASSINATURA</span><b>→</b><span>ATIVO</span></div></div>{% endblock %}
+{% extends 'base.html' %}
+{% block body %}
+<div class="dash-hero">
+  <div><div class="eyebrow">PAINEL GERENCIAL</div><h2>Gestão de Contratos</h2><p>Visão geral do fluxo contratual, pendências e desempenho por filial.</p></div>
+  <div class="hero-actions"><a class="btn" href="{{url_for('novo')}}">+ Novo / Importar CAPA</a><a class="btn light" href="{{url_for('pendencias')}}">Consultar contratos</a></div>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi"><span>Total de contratos</span><strong>{{kpis.total}}</strong><small>Base cadastrada</small></div>
+  <div class="kpi warning"><span>Pendentes</span><strong>{{kpis.pendente}}</strong><small>Aguardando tratamento</small></div>
+  <div class="kpi info"><span>Em elaboração</span><strong>{{kpis.elaboracao}}</strong><small>Em processamento</small></div>
+  <div class="kpi purple"><span>Aguardando assinatura</span><strong>{{kpis.assinatura}}</strong><small>Dependem de retorno</small></div>
+  <div class="kpi success"><span>Ativos</span><strong>{{kpis.ativo}}</strong><small>Contratos concluídos</small></div>
+  <div class="kpi danger"><span>Cancelados</span><strong>{{kpis.cancelado}}</strong><small>Encerrados sem ativação</small></div>
+</div>
+
+<div class="dash-grid">
+  <div class="card chart-card"><div class="card-head"><div><h3>Contratos por status</h3><p>Distribuição atual da carteira</p></div></div><div class="donut-wrap"><canvas id="statusChart"></canvas></div></div>
+  <div class="card chart-card wide"><div class="card-head"><div><h3>Contratos cadastrados por mês</h3><p>Últimos 12 meses</p></div></div><div class="line-wrap"><canvas id="monthChart"></canvas></div></div>
+</div>
+
+<div class="dash-grid lower">
+  <div class="card attention-card"><div class="card-head"><div><h3>Contratos que exigem atenção</h3><p>Pendências e processos mais antigos</p></div><a href="{{url_for('pendencias')}}">Ver todos →</a></div>
+    {% if atencao %}<div class="attention-list">{% for r in atencao %}<a class="attention-row" href="{{url_for('detalhe',id=r.id)}}"><div><strong>{{r.razao_social or r.nome_fantasia or 'Cliente não informado'}}</strong><span>{{r.chave}} • {{r.faturado_por or 'Filial não informada'}}</span></div><div class="attention-meta"><span class="status status-{{r.status|lower|replace(' ','-')|replace('ç','c')|replace('ã','a')}}">{{r.status}}</span><b>{{r.dias}} dia{% if r.dias != 1 %}s{% endif %}</b></div></a>{% endfor %}</div>{% else %}<div class="empty-state">Nenhum contrato exige atenção no momento.</div>{% endif %}
+  </div>
+  <div class="card branch-card"><div class="card-head"><div><h3>Resumo por filial</h3><p>Contratos por faturamento</p></div></div>
+    {% for f in filiais %}<div class="branch-row"><div><strong>{{f.nome}}</strong><span>{{f.total}} contrato{% if f.total != 1 %}s{% endif %}</span></div><div class="branch-bar"><i style="width:{{f.pct}}%"></i></div><b>{{f.total}}</b></div>{% endfor %}
+  </div>
+</div>
+
+<div class="card recent-card"><div class="card-head"><div><h3>Últimos contratos cadastrados</h3><p>Movimentações mais recentes do sistema</p></div><a href="{{url_for('pendencias')}}">Abrir lista completa →</a></div>
+<div class="table-scroll"><table><thead><tr><th>Contrato</th><th>Cliente</th><th>Faturado por</th><th>Cadastro</th><th>Status</th><th></th></tr></thead><tbody>{% for r in recentes %}<tr><td><strong>{{r.chave}}</strong></td><td>{{r.razao_social or r.nome_fantasia or '-'}}</td><td>{{r.faturado_por or '-'}}</td><td>{{r.data_br}}</td><td><span class="status status-{{r.status|lower|replace(' ','-')|replace('ç','c')|replace('ã','a')}}">{{r.status}}</span></td><td><a class="table-link" href="{{url_for('detalhe',id=r.id)}}">Ver →</a></td></tr>{% else %}<tr><td colspan="6" class="empty-state">Nenhum contrato cadastrado.</td></tr>{% endfor %}</tbody></table></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+const statusData={{status_chart|tojson}}; const monthData={{month_chart|tojson}};
+new Chart(document.getElementById('statusChart'),{type:'doughnut',data:{labels:statusData.labels,datasets:[{data:statusData.values,backgroundColor:['#eab308','#3b82f6','#6366f1','#f97316','#16a34a','#dc2626'],borderWidth:0,hoverOffset:5}]},options:{responsive:true,maintainAspectRatio:false,cutout:'70%',plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:8,padding:14}}}}});
+new Chart(document.getElementById('monthChart'),{type:'line',data:{labels:monthData.labels,datasets:[{label:'Contratos',data:monthData.values,borderColor:'#14805f',backgroundColor:'rgba(20,128,95,.10)',fill:true,tension:.35,pointRadius:4,pointBackgroundColor:'#14805f'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0},grid:{color:'#edf2f0'}},x:{grid:{display:false}}}}});
+</script>
+{% endblock %}
