@@ -520,7 +520,20 @@ def salvar():
 @app.route('/pendencias')
 @login_required
 def pendencias():
- c=con(); rows=c.execute('select * from contratos order by id desc').fetchall(); c.close(); return render_template('pendencias.html',rows=rows)
+ filters={k:request.args.get(k,'').strip() for k in ('q','inicio','fim','mes','ano','status','filial')}
+ clauses=[]; params=[]
+ if filters['q']:
+  clauses.append('(LOWER(razao_social) LIKE ? OR LOWER(cpf_cnpj) LIKE ? OR LOWER(chave) LIKE ?)')
+  params.extend(['%'+filters['q'].lower()+'%']*3)
+ if filters['inicio']: clauses.append('substr(criado_em,1,10)>=?'); params.append(filters['inicio'])
+ if filters['fim']: clauses.append('substr(criado_em,1,10)<=?'); params.append(filters['fim'])
+ if filters['mes'] in [str(i) for i in range(1,13)]: clauses.append('substr(criado_em,6,2)=?'); params.append(filters['mes'].zfill(2))
+ if filters['ano'].isdigit() and len(filters['ano'])==4: clauses.append('substr(criado_em,1,4)=?'); params.append(filters['ano'])
+ if filters['status']: clauses.append('status=?'); params.append(filters['status'])
+ if filters['filial']: clauses.append('faturado_por=?'); params.append(filters['filial'])
+ sql='SELECT * FROM contratos'+(' WHERE '+' AND '.join(clauses) if clauses else '')+' ORDER BY id DESC'
+ c=con(); rows=c.execute(sql,tuple(params)).fetchall(); c.close()
+ return render_template('pendencias.html',rows=rows,filters=filters,status_opts=STATUS_OPTS)
 @app.route('/contrato/<int:id>')
 @login_required
 def detalhe(id):
@@ -636,8 +649,19 @@ def _rescisao_pdf(r,path):
 @app.route('/rescisoes')
 @login_required
 def rescisoes():
- c=con(); rows=c.execute('SELECT * FROM rescisoes ORDER BY id DESC').fetchall(); c.close()
- return render_template('rescisoes.html',rows=rows,status_opts=RESCISAO_STATUS)
+ filters={k:request.args.get(k,'').strip() for k in ('q','inicio','fim','mes','ano','status','filial')}
+ clauses=[]; params=[]
+ if filters['q']:
+  clauses.append('(LOWER(cliente) LIKE ? OR LOWER(cnpj) LIKE ? OR LOWER(chave) LIKE ?)'); params.extend(['%'+filters['q'].lower()+'%']*3)
+ if filters['inicio']: clauses.append('substr(criado_em,1,10)>=?'); params.append(filters['inicio'])
+ if filters['fim']: clauses.append('substr(criado_em,1,10)<=?'); params.append(filters['fim'])
+ if filters['mes'] in [str(i) for i in range(1,13)]: clauses.append('substr(criado_em,6,2)=?'); params.append(filters['mes'].zfill(2))
+ if filters['ano'].isdigit() and len(filters['ano'])==4: clauses.append('substr(criado_em,1,4)=?'); params.append(filters['ano'])
+ if filters['status']: clauses.append('status=?'); params.append(filters['status'])
+ if filters['filial']: clauses.append('filial=?'); params.append(filters['filial'])
+ sql='SELECT * FROM rescisoes'+(' WHERE '+' AND '.join(clauses) if clauses else '')+' ORDER BY id DESC'
+ c=con(); rows=c.execute(sql,tuple(params)).fetchall(); c.close()
+ return render_template('rescisoes.html',rows=rows,status_opts=RESCISAO_STATUS,filters=filters)
 
 @app.route('/rescisoes/nova',methods=['GET','POST'])
 @login_required
