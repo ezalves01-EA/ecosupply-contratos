@@ -60,6 +60,10 @@ def init():
  else:
   # Mantém a senha do administrador sincronizada com ADMIN_PASSWORD do Render.
   c.execute('update usuarios set senha_hash=?, perfil=?, ativo=1 where usuario=?',(generate_password_hash(pwd),'ADMIN',admin))
+ if _is_pg():
+  c.execute("""CREATE TABLE IF NOT EXISTS rescisoes(id SERIAL PRIMARY KEY, chave TEXT UNIQUE, filial TEXT, status TEXT, criado_em TEXT, atualizado_em TEXT, cliente TEXT, cnpj TEXT, ie TEXT, endereco TEXT, cidade TEXT, uf TEXT, cep TEXT, representante TEXT, rg TEXT, cpf TEXT, data_contrato TEXT, data_notificacao TEXT, data_encerramento TEXT, data_assinatura TEXT, motivo TEXT, observacoes TEXT, criado_por TEXT)""")
+ else:
+  c.execute("""CREATE TABLE IF NOT EXISTS rescisoes(id INTEGER PRIMARY KEY AUTOINCREMENT, chave TEXT UNIQUE, filial TEXT, status TEXT, criado_em TEXT, atualizado_em TEXT, cliente TEXT, cnpj TEXT, ie TEXT, endereco TEXT, cidade TEXT, uf TEXT, cep TEXT, representante TEXT, rg TEXT, cpf TEXT, data_contrato TEXT, data_notificacao TEXT, data_encerramento TEXT, data_assinatura TEXT, motivo TEXT, observacoes TEXT, criado_por TEXT)""")
  c.commit(); c.close()
 init()
 
@@ -551,4 +555,137 @@ def gerar_pdf(id):
  guard=protect(id)
  if guard:return guard
  c=con(); r=c.execute('select * from contratos where id=?',(id,)).fetchone(); c.close(); pdf=OUT/f"{r['chave']}_CONTRATO.pdf"; build_pdf_v4(r,pdf); c=con(); c.execute("update contratos set status='CONTRATO GERADO' where id=?",(id,)); c.commit(); c.close(); return send_file(pdf,as_attachment=True,download_name=pdf.name,mimetype='application/pdf')
+
+
+# ----------------- MODULO DE RESCISOES (V9) -----------------
+RESCISAO_STATUS=['PENDENTE','EM ELABORAÇÃO','RESCISÃO GERADA','AGUARDANDO ASSINATURA','RESCINDIDO','CANCELADO']
+RESCISAO_CAMPOS=['filial','cliente','cnpj','ie','endereco','cidade','uf','cep','representante','rg','cpf','data_contrato','data_notificacao','data_encerramento','data_assinatura','motivo','observacoes']
+RESCISAO_FILIAIS={'campo_grande':'Campo Grande / MS','cuiaba':'Cuiabá / MT','sinop':'Sinop / MT'}
+RESCISAO_MODELOS={'campo_grande':'rescisao_campo_grande.docx','cuiaba':'rescisao_cuiaba.docx','sinop':'rescisao_sinop.docx'}
+RESCISAO_CLIENTES_MODELO={'campo_grande':'RAVIERA E-MOBILITY LTDA','cuiaba':'POSTO ALDO MARINGA LTDA','sinop':'MECANICA E AUTO ELETRICA CAVERZAN LTDA'}
+
+def _data_extenso(x):
+ try:
+  d=date.fromisoformat(x)
+  return f'{d.day:02d} de {("janeiro fevereiro março abril maio junho julho agosto setembro outubro novembro dezembro").split()[d.month-1]} de {d.year}'
+ except Exception:return x or '___ de __________ de ______'
+
+def _rescisao_doc(r):
+ """Preserva o DOCX original por filial, substituindo dados variáveis em seus parágrafos."""
+ filial=r['filial']; doc=Document(str(BASE/RESCISAO_MODELOS[filial]))
+ cliente=r['cliente'].strip(); antigo=RESCISAO_CLIENTES_MODELO[filial]
+ # Textos identificadores e endereços dos clientes-modelo; não modificar os dados fixos das filiais.
+ old_clients={
+ 'campo_grande':['RAVIERA E-MOBILITY LTDA','CAMPO GRANDE, Estado de Mato Grosso do Sul, na AV CORONEL ANTONINO, nº 513 - Bairro CORONEL ANTONINO - CEP: 79.022-000','52.012.765/0004-98','28.487.640-2','Willian Atallah','3039389 SSP/SP','036.597.128-68'],
+ 'cuiaba':['POSTO ALDO MARINGA LTDA','RONDONOPOLIS, Estado de Mato Grosso, na ROD BR364 - SALA 01, nº S/N - Bairro PARQUE INDUSTRIAL VETORASSO - CEP: 78746-060','09.428.424/0002-07','14.075.466-0','Romerito Pereira de Almeida','011.709.811-6'],
+ 'sinop':['MECANICA E AUTO ELETRICA CAVERZAN LTDA','Lucas do Rio Verde, Estado de Mato Grosso, na Rua Matrinxa nº: 4691 w, Bairro Loteamento Industrial V','31.304.795/0001-55','13.735.100-3']}
+ import re
+ replacements=[(antigo,cliente)]
+ vals=old_clients[filial]
+ if len(vals)>1: replacements.append((vals[1],f"{r['cidade']}, {r['uf']}, {r['endereco']}" + (f", CEP {r['cep']}" if r['cep'] else '')))
+ if len(vals)>2:replacements.append((vals[2],r['cnpj']))
+ if len(vals)>3:replacements.append((vals[3],r['ie']))
+ if len(vals)>4:replacements.append((vals[4],r['representante']))
+ if len(vals)>5:replacements.append((vals[5],r['rg'] if filial=='campo_grande' else r['cpf']))
+ if len(vals)>6:replacements.append((vals[6],r['cpf']))
+ # Regulariza datas de encerramento, data do instrumento e assinatura com base nos campos do formulário.
+ all_paragraphs=list(doc.paragraphs)
+ for table in doc.tables:
+  for row in table.rows:
+   for cell in row.cells:all_paragraphs.extend(cell.paragraphs)
+ for paragraph in all_paragraphs:
+  if not paragraph.runs:continue
+  original=''.join(run.text for run in paragraph.runs)
+  changed=original
+  for a,b in replacements:
+   changed=re.sub(re.escape(a),lambda m:b or '',changed,flags=re.IGNORECASE)
+  if 'notificou a CONTRATADA' in changed and r['data_contrato']:
+   changed=re.sub(r'(firmado entre as partes)\s+.*?(?=\s+resolve celebrar)',lambda m:m.group(1)+' em '+_data_extenso(r['data_contrato']),changed,flags=re.IGNORECASE)
+  if 'encerrará em' in changed.lower() and r['data_encerramento']:
+   changed=re.sub(r'(encerrará em)\s+[^.\n]*',lambda m:m.group(1)+' '+_data_extenso(r['data_encerramento']),changed,flags=re.IGNORECASE)
+  if ((' – ' in changed or ', MT –' in changed) and ('de 2026' in changed or 'de 2025' in changed)) and r['data_assinatura']:
+   if changed.strip().startswith(('Campo Grande','Cuiaba','Sinop')):
+    changed=f"{RESCISAO_FILIAIS[filial].replace(' / ', ' – ')}, {_data_extenso(r['data_assinatura'])}."
+  if changed!=original:
+   paragraph.runs[0].text=changed
+   for run in paragraph.runs[1:]:run.text=''
+ return doc
+
+def _rescisao_pdf(r,path):
+ from reportlab.platypus import SimpleDocTemplate,Paragraph,Spacer,Image,Table,TableStyle,KeepTogether
+ from reportlab.lib.styles import getSampleStyleSheet,ParagraphStyle
+ from reportlab.lib.enums import TA_JUSTIFY,TA_CENTER
+ from reportlab.lib import colors
+ from reportlab.lib.units import cm
+ from xml.sax.saxutils import escape
+ filial=r['filial']; empresa={'sinop':'ECOSUPPLY RECICLADORA DO NORTE LTDA','campo_grande':'ECOSUPPLY RECICLADORA LTDA','cuiaba':'ECOSUPPLY RECICLADORA LTDA'}[filial]
+ fd={'campo_grande':('Campo Grande','MS','Av. Cônsul Assaf Trad, 2739, Coronel Antonino, CEP 79013-545','10.533.843/0001-07','28.350.688-1'), 'cuiaba':('Cuiabá','MT','Rua Paulo Masayuki Uezato, S/N, Quadra Ind. 7, Lotes 22 a 24, Distrito Industrial, CEP 78098-400','10.533.843/0002-98','13.432.014-0'), 'sinop':('Sinop','MT','Estrada Municipal Castanheira, S/N, Lote 01 Quadra 11, Bairro Lídia','62.463.190/0001-30','14.145.716-3')}[filial]
+ sty=getSampleStyleSheet(); sty.add(ParagraphStyle(name='resbody',fontName='Helvetica',fontSize=10,leading=15,alignment=TA_JUSTIFY,spaceAfter=12));sty.add(ParagraphStyle(name='restitle',parent=sty['resbody'],fontName='Helvetica-Bold',alignment=TA_CENTER,spaceAfter=16));sty.add(ParagraphStyle(name='reshead',parent=sty['resbody'],fontName='Helvetica-Bold',spaceBefore=12));sty.add(ParagraphStyle(name='rescenter',parent=sty['resbody'],alignment=TA_CENTER))
+ e=lambda x:escape(str(x or ''))
+ story=[]
+ logo=BASE/'static/logo_ecosupply.png'
+ if logo.exists():story.append(Image(str(logo),width=5.3*cm,height=1.25*cm,kind='proportional'))
+ story.append(Paragraph(f'<b>{e(empresa)}</b><br/>{e(fd[2])}<br/>{e(fd[0])} - {e(fd[1])}<br/>CNPJ: {fd[3]} | IE: {fd[4]}',sty['rescenter']))
+ story.append(Spacer(1,20))
+ story.append(Paragraph(f'RESCISÃO DE CONTRATO DE PRESTAÇÃO DE SERVIÇO DE RETIRADA, DECOMPOSIÇÃO, TRATAMENTO E DESCARTE DE RESÍDUO FIRMADO ENTRE {e(empresa)} E {e(r["cliente"])}',sty['restitle']))
+ body=[f'Pelo presente instrumento particular e na melhor forma de direito, de um lado:',f'<b>{e(r["cliente"])}</b>, pessoa jurídica de direito privado com sede em {e(r["cidade"])} - {e(r["uf"])}, {e(r["endereco"])}, CEP {e(r["cep"])}, inscrita no CNPJ sob nº {e(r["cnpj"])} e Inscrição Estadual nº {e(r["ie"])}'+(f', neste ato representada por {e(r["representante"])}, RG nº {e(r["rg"])}, CPF nº {e(r["cpf"])}' if r['representante'] else '')+', doravante denominada CONTRATANTE.',f'<b>{e(empresa)}</b>, com sede em {e(fd[0])}, {e(fd[1])}, {e(fd[2])}, CNPJ nº {fd[3]} e Inscrição Estadual nº {fd[4]}, doravante denominada CONTRATADA.',f'Considerando que a CONTRATANTE notificou a CONTRATADA com antecedência de 30 (trinta) dias, conforme previsão contratual aplicável, sobre a intenção de rescindir o contrato firmado em {_data_extenso(r["data_contrato"])}, as partes celebram a presente rescisão.', '<b>CLÁUSULA PRIMEIRA – DO OBJETO</b>',f'O Contrato de Prestação de Serviços de Retirada, Decomposição, Tratamento e Descarte encerrará em {_data_extenso(r["data_encerramento"])}.','Caso haja resíduos remanescentes, estes serão coletados no momento da retirada dos tambores. Havendo a referida coleta, será devida a última mensalidade correspondente aos serviços prestados.','<b>CLÁUSULA SEGUNDA – DA RESPONSABILIDADE</b>','As responsabilidades das partes em relação ao contrato se extinguem com a assinatura deste instrumento, ressalvadas as responsabilidades perante terceiros, notadamente ambientais, pelos atos praticados durante sua vigência, nos termos da legislação aplicável.','<b>ENCERRAMENTO</b>',f'As partes elegem o foro da Comarca de {e(fd[0])}/{e(fd[1])} para dirimir questões decorrentes deste instrumento.','<b>CLÁUSULA DE RESCISÃO</b>','Eventuais resíduos remanescentes serão coletados pela CONTRATADA no momento da retirada dos tambores. Havendo coleta, será devida a última mensalidade correspondente aos serviços prestados.',f'{e(fd[0])} – {e(fd[1])}, {_data_extenso(r["data_assinatura"])}.']
+ for line in body:story.append(Paragraph(line,sty['resbody']))
+ story.append(Spacer(1,24));story.append(Paragraph('________________________________          ________________________________',sty['rescenter']));story.append(Paragraph(f'CONTRATADA: {e(empresa)}<br/>CONTRATANTE: {e(r["cliente"])}',sty['rescenter']))
+ SimpleDocTemplate(str(path),pagesize=(21*cm,29.7*cm),leftMargin=2*cm,rightMargin=2*cm,topMargin=1.8*cm,bottomMargin=1.8*cm).build(story)
+
+@app.route('/rescisoes')
+@login_required
+def rescisoes():
+ c=con(); rows=c.execute('SELECT * FROM rescisoes ORDER BY id DESC').fetchall(); c.close()
+ return render_template('rescisoes.html',rows=rows,status_opts=RESCISAO_STATUS)
+
+@app.route('/rescisoes/nova',methods=['GET','POST'])
+@login_required
+def rescisao_nova():
+ if request.method=='POST':
+  d={k:request.form.get(k,'').strip() for k in RESCISAO_CAMPOS}
+  if d['filial'] not in RESCISAO_FILIAIS or not d['cliente'] or not d['cnpj'] or not d['data_encerramento']:
+   flash('Preencha filial, razão social, CNPJ e data de encerramento.');return render_template('rescisao_form.html',d=d,filiais=RESCISAO_FILIAIS,action=url_for('rescisao_nova'))
+  c=con(); now=datetime.now().isoformat(timespec='seconds'); chave='RC-'+str(datetime.now().year)+'-'+datetime.now().strftime('%m%d%H%M%S%f')[-11:]
+  cols=['chave','status','criado_em','atualizado_em','criado_por']+RESCISAO_CAMPOS
+  vals=[chave,'PENDENTE',now,now,session.get('usuario','')]+[d[k] for k in RESCISAO_CAMPOS]
+  c.execute(f"INSERT INTO rescisoes ({','.join(cols)}) VALUES ({','.join(['?']*len(cols))})",vals);c.commit();c.close();flash('Rescisão cadastrada.');return redirect(url_for('rescisoes'))
+ return render_template('rescisao_form.html',d={},filiais=RESCISAO_FILIAIS,action=url_for('rescisao_nova'))
+
+@app.route('/rescisoes/<int:id>/editar',methods=['GET','POST'])
+@login_required
+def rescisao_editar(id):
+ c=con();r=c.execute('SELECT * FROM rescisoes WHERE id=?',(id,)).fetchone()
+ if not r:c.close();return 'Rescisão não encontrada',404
+ if request.method=='POST':
+  if request.form.get('senha_acoes')!=ACTION_PASSWORD:
+   c.close();flash('Senha de ações incorreta.');return redirect(url_for('rescisoes'))
+  d={k:request.form.get(k,'').strip() for k in RESCISAO_CAMPOS}
+  if d['filial'] not in RESCISAO_FILIAIS or not d['cliente'] or not d['cnpj'] or not d['data_encerramento']:
+   c.close();flash('Dados obrigatórios ausentes.');return redirect(url_for('rescisao_editar',id=id))
+  c.execute('UPDATE rescisoes SET '+','.join(f'{k}=?' for k in RESCISAO_CAMPOS)+', atualizado_em=? WHERE id=?',[d[k] for k in RESCISAO_CAMPOS]+[datetime.now().isoformat(timespec='seconds'),id]);c.commit();c.close();flash('Rescisão atualizada.');return redirect(url_for('rescisoes'))
+ c.close();return render_template('rescisao_form.html',d=dict(r),filiais=RESCISAO_FILIAIS,action=url_for('rescisao_editar',id=id),editing=True)
+
+@app.route('/rescisoes/<int:id>/status',methods=['POST'])
+@login_required
+def rescisao_status(id):
+ if request.form.get('senha_acoes')!=ACTION_PASSWORD:flash('Senha de ações incorreta.');return redirect(url_for('rescisoes'))
+ status=request.form.get('status')
+ if status not in RESCISAO_STATUS:flash('Status inválido.');return redirect(url_for('rescisoes'))
+ c=con();c.execute('UPDATE rescisoes SET status=?, atualizado_em=? WHERE id=?',(status,datetime.now().isoformat(timespec='seconds'),id));c.commit();c.close();return redirect(url_for('rescisoes'))
+
+@app.route('/rescisoes/<int:id>/gerar/<tipo>',methods=['POST'])
+@login_required
+def rescisao_gerar(id,tipo):
+ if request.form.get('senha_acoes')!=ACTION_PASSWORD:flash('Senha de ações incorreta.');return redirect(url_for('rescisoes'))
+ if tipo not in ('word','pdf'):return 'Formato inválido',400
+ c=con();r=c.execute('SELECT * FROM rescisoes WHERE id=?',(id,)).fetchone()
+ if not r:c.close();return 'Rescisão não encontrada',404
+ filename=re.sub(r'[^a-zA-Z0-9_-]','_',r['chave'])+'_RESCISAO.'+('docx' if tipo=='word' else 'pdf');path=OUT/filename
+ if tipo=='word':_rescisao_doc(r).save(str(path))
+ else:_rescisao_pdf(r,path)
+ if r['status'] in ('PENDENTE','EM ELABORAÇÃO'):
+  c.execute('UPDATE rescisoes SET status=?, atualizado_em=? WHERE id=?',('RESCISÃO GERADA',datetime.now().isoformat(timespec='seconds'),id));c.commit()
+ c.close();return send_file(path,as_attachment=True,download_name=filename)
+
 if __name__=='__main__': app.run(debug=False,host='0.0.0.0',port=int(os.getenv('PORT','5000')))
