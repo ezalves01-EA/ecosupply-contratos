@@ -1,715 +1,217 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session
-from functools import wraps
-from werkzeug.security import generate_password_hash, check_password_hash
+"""Painel de programação Ecosupply. Python 3.11+."""
+import getpass
+import json
 import os
-from openpyxl import load_workbook
-from docx import Document
-from docx.shared import Pt, Cm
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
-from docx.enum.section import WD_SECTION
-from docx.oxml.ns import qn
-from docx.oxml import OxmlElement
+import sqlite3
+import threading
+import secrets
+import datetime as dt
+from month_store import initialize,save_month,catalog,automatic_scope,current_month
+from sisgr import Client, synchronize, Erro
+from enrichment import plate, TRANSPORTERS, load_vehicle_export, enrich_snapshot, apply_regions
 from pathlib import Path
-import sqlite3, json, shutil, subprocess, re, io
-from datetime import datetime, date
+from flask import Flask, Response, jsonify, request, send_from_directory
+from werkzeug.security import check_password_hash, generate_password_hash
 
-BASE=Path(__file__).resolve().parent
-DB=BASE/'contratos.db'; UP=Path(os.getenv('UPLOAD_DIR', str(BASE/'uploads'))); OUT=Path(os.getenv('OUTPUT_DIR', str(BASE/'gerados')))
-UP.mkdir(parents=True,exist_ok=True); OUT.mkdir(parents=True,exist_ok=True)
-DATABASE_URL=os.getenv('DATABASE_URL','').strip()
-app=Flask(__name__); app.secret_key=os.getenv('SECRET_KEY','troque-esta-chave-em-producao'); ACTION_PASSWORD=os.getenv('ACTION_PASSWORD','123456'); STATUS_OPTS=['PENDENTE','EM ELABORAÇÃO','CONTRATO GERADO','AGUARDANDO ASSINATURA','ATIVO','CANCELADO']
-app.config['MAX_CONTENT_LENGTH']=12*1024*1024
+ROOT = Path(__file__).resolve().parent
+AUTH_FILE = ROOT / 'instance' / 'auth.json'
 
-FIELDS=['razao_social','nome_fantasia','endereco','numero','bairro','cep','cidade','uf','emite_mtr','link_maps','lat_long','cpf_cnpj','ie','telefone_empresa','atividade','contato','email_nfe','telefone_contato','email_contato','responsavel','email_responsavel','cpf_responsavel','rg','cargo','representante','faturado_por','coletado_por','inicio','limpeza_csao','periodicidade','franquia_agua','franquia_solidos','franquia_terra','valor_faturamento','valor_agua','valor_excedente','valor_terra','valor_lampada','outros_valores','deslocamento','faturamento_minimo','dia_limite_faturamento','categoria','faturamento_mensal','medicao_diaria','dia_especifico','tipo_prazo','parcela','prazo_dia_fixo','faturamento_terceiro','cliente_gerador','observacoes']
-for i in range(1,6): FIELDS += [f'kit_emb_{i}',f'kit_cor_{i}',f'kit_qtd_{i}']
+def create_app(auth=None, token=None, db_path=None):
+    app = Flask(__name__, static_folder=None)
+    app.config['MAX_CONTENT_LENGTH']=4096
+    token=token or os.environ.get('SISGR_TOKEN','').strip()
+    db_path=Path(db_path or os.environ.get('DATABASE_PATH') or ROOT/'instance'/'painel.sqlite')
+    hosted=bool(os.environ.get('RENDER'))
+    allowed_hosts={'127.0.0.1','localhost'} | {h.strip() for h in os.environ.get('ALLOWED_HOSTS','').split(',') if h.strip()}
+    if os.environ.get('RENDER_EXTERNAL_HOSTNAME'):allowed_hosts.add(os.environ['RENDER_EXTERNAL_HOSTNAME'])
+    if hosted:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app=ProxyFix(app.wsgi_app,x_for=1,x_proto=1)
+    db_path.parent.mkdir(parents=True,exist_ok=True)
+    with sqlite3.connect(db_path) as db:db.execute('CREATE TABLE IF NOT EXISTS snapshot (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)')
+    with sqlite3.connect(db_path) as db:db.execute('CREATE TABLE IF NOT EXISTS settings (name TEXT PRIMARY KEY, payload TEXT NOT NULL)')
+    initialize(db_path)
+    def plate_map():
+        with sqlite3.connect(db_path) as db:row=db.execute("SELECT payload FROM settings WHERE name='plates'").fetchone()
+        return json.loads(row[0]) if row else {}
+    csrf=secrets.token_urlsafe(32)
+    lock=threading.Lock()
+    state={'running':False,'message':'Pronto para sincronizar.','success':None}
+    geo=json.loads((ROOT/'data'/'geografia.json').read_text(encoding='utf-8'))
+    def load(month=None):
+        items=catalog(db_path)
+        selected=month or (current_month() if any(x['month']==current_month() for x in items) else items[0]['month'] if items else None)
+        with sqlite3.connect(db_path) as db:
+            row=db.execute('SELECT payload FROM monthly_snapshot WHERE month=?',(selected,)).fetchone()
+            if not items and not month:row=db.execute('SELECT payload FROM snapshot WHERE id=1').fetchone()
+        if row:
+            data=apply_regions(enrich_snapshot(json.loads(row[0]),load_vehicle_export(),plate_map()),geo)
+            if 'meta' in data:data['meta'].update(months=items,selectedMonth=selected,currentMonth=current_month())
+            return data
+        today=dt.datetime.now(dt.timezone(dt.timedelta(hours=-4))).date().isoformat()
+        return {'rows':[],'geo':geo,'meta':{'schemaVersion':4,'source':'API SISGR · aguardando primeira sincronização','sourceRows':0,'periodStart':today,'periodEnd':today,'quality':[],'volumePending':0,'signatureUnknown':0,'months':items,'selectedMonth':selected,'currentMonth':current_month()}}
 
-def _is_pg(): return DATABASE_URL.startswith('postgresql://') or DATABASE_URL.startswith('postgres://')
+    if auth is None:
+        if os.environ.get('DASHBOARD_USER') and os.environ.get('DASHBOARD_PASSWORD_HASH'):
+            auth = {'user': os.environ['DASHBOARD_USER'], 'hash': os.environ['DASHBOARD_PASSWORD_HASH']}
+        elif not hosted and AUTH_FILE.exists():
+            auth = json.loads(AUTH_FILE.read_text(encoding='utf-8'))
+        else:
+            auth = {}
 
-class DBConn:
- def __init__(self):
-  self.pg=_is_pg()
-  if self.pg:
-   import psycopg
-   from psycopg.rows import dict_row
-   url=DATABASE_URL.replace('postgres://','postgresql://',1)
-   self.c=psycopg.connect(url,row_factory=dict_row)
-  else:
-   self.c=sqlite3.connect(DB); self.c.row_factory=sqlite3.Row
- def execute(self,sql,params=()):
-  if self.pg: sql=sql.replace('?', '%s')
-  return self.c.execute(sql,params)
- def commit(self): self.c.commit()
- def rollback(self): self.c.rollback()
- def close(self): self.c.close()
+    @app.before_request
+    def authenticate():
+        if request.host.split(':')[0] not in allowed_hosts:
+            return Response('Host não autorizado.',403)
+        if request.path == '/health':
+            return None
+        if not auth.get('user') or not auth.get('hash'):
+            return Response('Configure o acesso executando python app.py.', 503)
+        supplied = request.authorization
+        if not supplied or supplied.type != 'basic' or supplied.username != auth['user'] or not check_password_hash(auth['hash'], supplied.password or ''):
+            return Response('Autenticação necessária.', 401, {'WWW-Authenticate': 'Basic realm="Ecosupply", charset="UTF-8"'})
 
-def con(): return DBConn()
+    @app.after_request
+    def headers(response):
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Frame-Options'] = 'DENY'
+        response.headers['Referrer-Policy'] = 'no-referrer'
+        if hosted:response.headers['Strict-Transport-Security']='max-age=31536000'
+        return response
 
-def init():
- c=con(); cols=', '.join([f'"{x}" TEXT' for x in FIELDS])
- if _is_pg():
-  c.execute(f"CREATE TABLE IF NOT EXISTS contratos(id SERIAL PRIMARY KEY,chave TEXT,status TEXT DEFAULT 'PENDENTE',criado_em TEXT,{cols})")
-  c.execute("CREATE TABLE IF NOT EXISTS usuarios(id SERIAL PRIMARY KEY, usuario TEXT UNIQUE NOT NULL, nome TEXT, senha_hash TEXT NOT NULL, perfil TEXT NOT NULL DEFAULT 'USUARIO', ativo INTEGER NOT NULL DEFAULT 1)")
- else:
-  c.execute(f"CREATE TABLE IF NOT EXISTS contratos(id INTEGER PRIMARY KEY AUTOINCREMENT,chave TEXT,status TEXT DEFAULT 'PENDENTE',criado_em TEXT,{cols})")
-  c.execute("CREATE TABLE IF NOT EXISTS usuarios(id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT UNIQUE NOT NULL, nome TEXT, senha_hash TEXT NOT NULL, perfil TEXT NOT NULL DEFAULT 'USUARIO', ativo INTEGER NOT NULL DEFAULT 1)")
- admin=os.getenv('ADMIN_USER','admin'); pwd=os.getenv('ADMIN_PASSWORD','123456')
- existing_admin=c.execute('select id from usuarios where usuario=?',(admin,)).fetchone()
- if not existing_admin:
-  c.execute('insert into usuarios(usuario,nome,senha_hash,perfil,ativo) values(?,?,?,?,1)',(admin,'Administrador',generate_password_hash(pwd),'ADMIN'))
- else:
-  # Mantém a senha do administrador sincronizada com ADMIN_PASSWORD do Render.
-  c.execute('update usuarios set senha_hash=?, perfil=?, ativo=1 where usuario=?',(generate_password_hash(pwd),'ADMIN',admin))
- if _is_pg():
-  c.execute("""CREATE TABLE IF NOT EXISTS rescisoes(id SERIAL PRIMARY KEY, chave TEXT UNIQUE, filial TEXT, status TEXT, criado_em TEXT, atualizado_em TEXT, cliente TEXT, cnpj TEXT, ie TEXT, endereco TEXT, cidade TEXT, uf TEXT, cep TEXT, representante TEXT, rg TEXT, cpf TEXT, data_contrato TEXT, data_notificacao TEXT, data_encerramento TEXT, data_assinatura TEXT, motivo TEXT, observacoes TEXT, criado_por TEXT)""")
- else:
-  c.execute("""CREATE TABLE IF NOT EXISTS rescisoes(id INTEGER PRIMARY KEY AUTOINCREMENT, chave TEXT UNIQUE, filial TEXT, status TEXT, criado_em TEXT, atualizado_em TEXT, cliente TEXT, cnpj TEXT, ie TEXT, endereco TEXT, cidade TEXT, uf TEXT, cep TEXT, representante TEXT, rg TEXT, cpf TEXT, data_contrato TEXT, data_notificacao TEXT, data_encerramento TEXT, data_assinatura TEXT, motivo TEXT, observacoes TEXT, criado_por TEXT)""")
- c.commit(); c.close()
-init()
+    @app.get('/health')
+    def health():
+        return jsonify(status='ok')
 
-def login_required(fn):
- @wraps(fn)
- def wrapper(*args,**kwargs):
-  if not session.get('user_id'): return redirect(url_for('login',next=request.path))
-  return fn(*args,**kwargs)
- return wrapper
+    @app.get('/')
+    def index():
+        return send_from_directory(ROOT / 'web', 'index.html')
 
-def admin_required(fn):
- @wraps(fn)
- def wrapper(*args,**kwargs):
-  if not session.get('user_id'): return redirect(url_for('login'))
-  if session.get('perfil')!='ADMIN': flash('Acesso exclusivo do administrador.'); return redirect(url_for('index'))
-  return fn(*args,**kwargs)
- return wrapper
+    @app.get('/app.js')
+    def script():
+        return send_from_directory(ROOT / 'web', 'app.js')
 
-def sval(v):
- if v is None:return ''
- if isinstance(v,(datetime,date)):return v.strftime('%d/%m/%Y')
- return str(v).strip()
+    @app.get('/driver_metrics.js')
+    def driver_metrics():
+        return send_from_directory(ROOT / 'web', 'driver_metrics.js')
 
-def read_capa(path):
- wb=load_workbook(path,data_only=True); ws=wb['CAPA']
- # Valores ficam nas células imediatamente à direita/área mesclada do rótulo.
- m={'razao_social':'C7','nome_fantasia':'C8','endereco':'C9','numero':'J9','bairro':'C10','cep':'J10','cidade':'C11','uf':'F11','emite_mtr':'I11','link_maps':'C12','lat_long':'I12','cpf_cnpj':'C13','telefone_empresa':'H13','ie':'C14','atividade':'H14','contato':'C15','email_nfe':'H15','telefone_contato':'C16','email_contato':'H16','responsavel':'C17','email_responsavel':'H17','cpf_responsavel':'C18','rg':'H18','cargo':'C19','representante':'H19','faturado_por':'D21','coletado_por':'I21','inicio':'D22','limpeza_csao':'I22','periodicidade':'D23','franquia_agua':'I23','franquia_solidos':'D24','franquia_terra':'I24','valor_faturamento':'D26','valor_agua':'I26','valor_excedente':'D27','valor_terra':'I27','valor_lampada':'D28','outros_valores':'I28','deslocamento':'D29','faturamento_minimo':'H29','dia_limite_faturamento':'J29','categoria':'D30','faturamento_mensal':'D30','medicao_diaria':'H30','dia_especifico':'J30','tipo_prazo':'D31','parcela':'H31','prazo_dia_fixo':'J31','faturamento_terceiro':'D32','cliente_gerador':'I32','observacoes':'B40'}
- d={k:sval(ws[v].value) for k,v in m.items()}
- for i,row in enumerate(range(34,39),1):
-  d[f'kit_emb_{i}']=sval(ws[f'C{row}'].value); d[f'kit_cor_{i}']=sval(ws[f'F{row}'].value); d[f'kit_qtd_{i}']=sval(ws[f'J{row}'].value)
- # Listas reais da aba SELECOES
- s=wb['SELECOES']
- def vals(col,rows): return [s.cell(r,col).value for r in rows if s.cell(r,col).value not in (None,'')]
- o={'pagamento':vals(1,range(3,6)),'filial':vals(3,range(3,6)),'representante':vals(4,range(3,6)),'mtr':vals(5,range(3,6)),'cond':vals(6,range(3,6)),'cor':vals(1,range(13,17)),'periodicidade':vals(2,range(12,17)),'embalagem':vals(4,range(12,19)),'categoria':vals(5,range(12,18)),'faturamento':vals(1,range(40,46))}
- # Formata campos monetários importados no padrão brasileiro.
- for k in ['valor_faturamento','valor_agua','valor_excedente','valor_terra','valor_lampada','deslocamento','faturamento_minimo']:
-  if d.get(k)!='': d[k]=fmt_br(d[k],2)
- return d,o
+    @app.get('/completion.js')
+    def completion():
+        return send_from_directory(ROOT / 'web', 'completion.js')
 
-def parse_num_br(v):
- if v in (None,''): return None
- if isinstance(v,(int,float)): return float(v)
- s=str(v).strip().replace('R$','').replace(' ','')
- try:
-  if ',' in s:
-   s=s.replace('.','').replace(',','.')
-  return float(s)
- except: return None
+    @app.get('/style.css')
+    def style():
+        return send_from_directory(ROOT / 'web', 'style.css')
 
-def fmt_br(v, casas=2):
- n=parse_num_br(v)
- if n is None: return ''
- x=f'{n:,.{casas}f}'
- return x.replace(',','X').replace('.',',').replace('X','.')
+    @app.get('/data.json')
+    def data():
+        month=request.args.get('month')
+        if month:
+            try:
+                from month_store import month_bounds
+                month_bounds(month)
+            except ValueError:return jsonify(error='Mês inválido.'),400
+        return jsonify(load(month))
 
-def money(v):
- x=fmt_br(v,2)
- return f'R$ {x}' if x else 'R$ 0,00'
+    @app.get('/sync/status')
+    def sync_status():
+        with lock:copy=dict(state)
+        return jsonify(**copy,csrf=csrf,configured=bool(token),version='1.10',automatic=os.environ.get('AUTO_SYNC','0')=='1',schedule='00h e 11h · Brasília',autoPeriod='Mês corrente de Brasília; histórico manual separado')
 
-def filial_key(nome):
- n=(nome or '').upper().strip()
- if 'NORTE' in n or 'ECONORTE' in n or 'SINOP' in n: return 'NORTE'
- if 'CAMPO' in n or 'GRANDE' in n: return 'CAMPO_GRANDE'
- return 'CUIABA'
+    @app.get('/vehicles/local')
+    def vehicle_local():
+        data=load();mapping=plate_map();found={}
+        for r in data.get('rows',[]):
+            vid=r.get('vehicleId')
+            if vid is None:continue
+            found[str(vid)]={'id':str(vid),'referencePlate':r.get('referencePlate') or '', 'referenceSource':r.get('referencePlateSource',''), 'localPlate':mapping.get(str(vid),'')}
+        return jsonify(vehicles=sorted(found.values(),key=lambda r:int(r['id']) if r['id'].isdigit() else 0))
 
-FILIAIS={
- 'CAMPO_GRANDE':{
-  'nome':'ECOSUPPLY RECICLADORA LTDA','cidade':'Campo Grande','uf':'MS','estado':'Mato Grosso do Sul',
-  'endereco':'Av. Consul Assaf Trad, 2.739, Coronel Antonino, CEP 79.013-545',
-  'cnpj':'10.533.843/0001-07','ie':'28.350.688-1','representante':'Valdiney Pedro Rodrigues','cargo':'Gerente Geral','cpf':'051.190.046-52',
-  'cabecalho':['ECOSUPPLY RECICLADORA LTDA.','Av. Cônsul Assaf Trad, 2739','Coronel Antonino','Campo Grande – MS','CEP: 79013-545','TEL: (67) 3373-0104','www.supplyservice.com.br'],
-  'foro':'Campo Grande/MS'
- },
- 'CUIABA':{
-  'nome':'ECOSUPPLY RECICLADORA LTDA','cidade':'Cuiabá','uf':'MT','estado':'Mato Grosso',
-  'endereco':'Rua Paulo Masayuki Uezato, S/N, Quadra ind. 7 Lote 22 a 24, Distrito Industrial, CEP 78.098-400',
-  'cnpj':'10.533.843/0002-98','ie':'13.432.014-0','representante':'Valdiney Pedro Rodrigues','cargo':'Gerente Geral','cpf':'051.190.046-52',
-  'cabecalho':['ECOSUPPLY RECICLADORA LTDA','Rua Paulo Masayuki Uezato, S/N, Quadra ind. 7 Lote 22 a 24','Distrito Industrial','Cuiabá – MT','CEP 78.098-400','www.supplyservice.com.br'],
-  'foro':'Campo Grande/MS'
- },
- 'NORTE':{
-  'nome':'ECOSUPPLY RECICLADORA DO NORTE LTDA','cidade':'Sinop','uf':'MT','estado':'Mato Grosso',
-  'endereco':'Estrada Municipal Castanheira, S/N, Lote 01 Quadra 11, Bairro Lídia',
-  'cnpj':'62.463.190/0001-30','ie':'14.145.716-3','representante':'','cargo':'','cpf':'',
-  'cabecalho':['ECOSUPPLY RECICLADORA DO NORTE LTDA','Estrada Municipal Castanheira, S/N, Lote 01 Quadra 11','Bairro Lídia','Sinop - MT','CNPJ: 62.463.190/0001-30','CEP: 78559-899'],
-  'foro':'Sinop/MT'
- }
-}
+    @app.post('/vehicles/local')
+    def save_vehicle_local():
+        if not secrets.compare_digest(request.headers.get('X-CSRF-Token',''),csrf):return jsonify(error='Recarregue a página.'),403
+        if request.headers.get('Origin') and request.headers['Origin']!=request.host_url.rstrip('/'):return jsonify(error='Origem inválida.'),403
+        changes=(request.get_json(silent=True) or {}).get('vehicles')
+        if not isinstance(changes,list) or len(changes)>100:return jsonify(error='Lista de placas inválida.'),400
+        mapping=plate_map()
+        for item in changes:
+            if not isinstance(item,dict) or not str(item.get('id','')).isdigit():return jsonify(error='ID inválido.'),400
+            raw=item.get('plate','')
+            if not isinstance(raw,str) or (raw.strip() and not plate(raw)):return jsonify(error='Placa inválida. Use AAA-1234 ou AAA-1A23.'),400
+            if raw.strip():mapping[str(item['id'])]=plate(raw)
+            else:mapping.pop(str(item['id']),None)
+        with lock:
+            if state['running']:return jsonify(error='Aguarde a sincronização terminar.'),409
+            data=load()
+            data=enrich_snapshot(data,load_vehicle_export(),mapping)
+            with sqlite3.connect(db_path) as db:
+                db.execute("INSERT INTO settings VALUES('plates',?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",(json.dumps(mapping),))
+                pass # Monthly data is preserved; local overrides are applied at read time.
+        return jsonify(saved=True)
 
-def filial_data(nome): return FILIAIS[filial_key(nome)]
+    @app.post('/sync')
+    def sync_start():
+        if not secrets.compare_digest(request.headers.get('X-CSRF-Token',''),csrf):return jsonify(error='Recarregue a página.'),403
+        if request.headers.get('Origin') and request.headers['Origin']!=request.host_url.rstrip('/'):
+            return jsonify(error='Origem inválida.'),403
+        if not token:return jsonify(error='Configure SISGR_TOKEN no servidor.'),400
+        values=request.get_json(silent=True) or {}
+        try:
+            start=values['start'];end=values['end'];a=dt.date.fromisoformat(start);b=dt.date.fromisoformat(end)
+            if not 0<=(b-a).days<31 or start[:7]!=end[:7]:raise ValueError()
+            transporters=values.get('transporterIds')
+            if not isinstance(transporters,list) or not transporters or len(transporters)>20 or any(not isinstance(t,str) or not t.isdigit() for t in transporters):raise ValueError()
+            transporters=list(dict.fromkeys(transporters))
+        except (KeyError,TypeError,ValueError):return jsonify(error='Escolha até 31 dias e ao menos uma transportadora (ID numérico).'),400
+        if not launch_sync(start,end,transporters):return jsonify(error='Já existe uma atualização em andamento.'),409
+        return jsonify(started=True),202
 
-def filial_text(nome):
- f=filial_data(nome)
- txt=f"{f['nome']}, com sede no Município de {f['cidade']}, Estado de {f['estado']}, na {f['endereco']}, devidamente inscrita no CNPJ sob nº {f['cnpj']} e Inscrição Estadual sob nº {f['ie']}"
- if f['representante']:
-  txt += f", neste ato representada pelo seu bastante procurador {f['representante']}, ocupante do cargo {f['cargo']} e portador do CPF: {f['cpf']}"
- return txt + ', doravante denominada CONTRATADA.'
+    def launch_sync(start,end,transporters):
+        with lock:
+            if state['running']:return False
+            state.update(running=True,message='Iniciando atualização…',success=None)
+        def progress(message):
+            with lock:state['message']=message
+        def worker():
+            try:
+                data=synchronize(Client(token,progress),start,end,geo,transporter_ids=transporters,plate_overrides=plate_map())
+                data=enrich_snapshot(data,load_vehicle_export(),plate_map())
+                payload=json.dumps(data,ensure_ascii=False,allow_nan=False)
+                save_month(db_path,data,start,end,transporters)
+                with lock:state.update(success=True,message=f"Atualização concluída: {len(data['rows'])} agendamentos. {data['meta'].get('vehiclePending',0)} sem placa confirmada. Período atualizado; demais datas e meses preservados.")
+            except Erro as e:
+                with lock:state.update(success=False,message=str(e))
+            except Exception:
+                with lock:state.update(success=False,message='Formato de dados inesperado. Última base preservada; confira o diagnóstico antes de repetir.')
+            finally:
+                with lock:state['running']=False
+        threading.Thread(target=worker,daemon=True).start()
+        return True
 
-def addp(doc,text,bold=False,center=False):
- p=doc.add_paragraph(); p.alignment=WD_ALIGN_PARAGRAPH.CENTER if center else WD_ALIGN_PARAGRAPH.JUSTIFY; p.paragraph_format.space_after=Pt(5); r=p.add_run(text); r.bold=bold; r.font.name='Arial'; r.font.size=Pt(10); return p
+    if os.environ.get('AUTO_SYNC','0')=='1':
+        from scheduler import start_scheduler
+        start_scheduler(db_path,lambda:automatic_scope(db_path,dt.datetime.now(dt.timezone.utc)),launch_sync,lambda:bool(token))
+    return app
 
-def build_doc(r,path):
- d=dict(r); doc=Document(); sec=doc.sections[0]; sec.top_margin=Cm(1.7); sec.bottom_margin=Cm(1.7); sec.left_margin=Cm(2); sec.right_margin=Cm(2)
- style=doc.styles['Normal']; style.font.name='Arial'; style._element.rPr.rFonts.set(qn('w:eastAsia'),'Arial'); style.font.size=Pt(10)
- addp(doc,'INSTRUMENTO PARTICULAR DE CONTRATO DE PRESTAÇÃO DE SERVIÇOS DE RETIRADA, DECOMPOSIÇÃO, TRATAMENTO E DESCARTE',True,True)
- addp(doc,'IDENTIFICAÇÃO DAS PARTES CONTRATANTES',True,True)
- ident=f"{d.get('razao_social','')}, pessoa jurídica/pessoa física com sede em {d.get('cidade','')}, Estado de {d.get('uf','')}, na {d.get('endereco','')}, nº {d.get('numero','')} - Bairro {d.get('bairro','')} - CEP: {d.get('cep','')}, inscrita no CPF/CNPJ sob n.º {d.get('cpf_cnpj','')} e Inscrição Estadual n.º {d.get('ie','')}, neste ato representada por {d.get('responsavel','')}, RG n.º {d.get('rg','')} e CPF n.º {d.get('cpf_responsavel','')}, doravante denominada CONTRATANTE."
- addp(doc,ident); addp(doc,filial_text(d.get('faturado_por')))
- addp(doc,'As partes acima identificadas têm, entre si, justo e acertado o presente Contrato de Prestação de Serviços, que se regerá pelas cláusulas seguintes e pelas condições de preço, forma e termo de pagamento descritas no presente.')
- addp(doc,'DO OBJETO DO CONTRATO',True,True)
- residuos=d.get('observacoes') or 'resíduos sólidos classe I e classe II conforme cadastro e caracterização fornecida pela CONTRATANTE'
- kits=[]
- for i in range(1,6):
-  if d.get(f'kit_emb_{i}') and d.get(f'kit_qtd_{i}'): kits.append(f"- {d[f'kit_qtd_{i}']} unidade(s) de {d[f'kit_emb_{i}']} - cor {d.get(f'kit_cor_{i}','')};")
- kittext='\n'.join(kits) if kits else '- Não há kit de coleta/comodato informado.'
- addp(doc,f"Cláusula 1ª. É objeto do presente contrato a prestação dos serviços de:\nA) Serviço de coleta, triagem e envio para tratamento/destinação de {residuos}.\nB) Fornecimento a título de comodato, sem custo adicional, de:\n{kittext}\nC) Transporte dos resíduos em caminhão licenciado para transporte de carga perigosa e com motorista habilitado com MOPP.\nD) Destinação ambientalmente adequada de todos os resíduos coletados.\nParágrafo único – Caberá à CONTRATANTE providenciar às suas expensas, quando se fizer necessário, a caracterização dos resíduos de que trata esta Cláusula, através de análises completas executadas em entidades ou laboratórios de reconhecida capacidade técnica, conforme técnicas e métodos estabelecidos pela Norma Técnica, Legal ou Regulamentar pertinente, fornecendo, à CONTRATADA, cópia do laudo assinado por profissional competente.")
- addp(doc,'OBRIGAÇÕES DA CONTRATANTE',True,True)
- addp(doc,'Cláusula 2ª. A CONTRATANTE deverá abster-se de transferir para os locais de coleta quaisquer dos itens enumerados na cláusula primeira originados de outros estabelecimentos geradores, ainda que da mesma empresa ou grupo econômico.')
- mtr=d.get('emite_mtr','')
- mtrtxt='Compete ao CONTRATANTE/GERADOR a responsabilidade pela emissão do Manifesto de Transporte de Resíduos – MTR, por meio do SINIR, para cada remessa de resíduos destinada à coleta e/ou destinação.' if 'CLIENTE' in mtr.upper() else 'A CONTRATANTE autoriza a operacionalização da emissão dos MTRs pela CONTRATADA, devendo cadastrá-la no SINIR com as permissões necessárias, permanecendo com a CONTRATANTE as demais obrigações ambientais vinculadas à geração de resíduos e declarações aos órgãos reguladores.'
- addp(doc,'Parágrafo Primeiro – Para fins deste instrumento, consideram-se “geradores” as pessoas físicas ou jurídicas que, em decorrência de sua atividade, gerem os resíduos objeto deste contrato.\nParágrafo Segundo – '+mtrtxt)
- addp(doc,'Cláusula 3ª. A CONTRATANTE deverá fornecer condições mínimas para atender a Segurança do Trabalho ao colaborador da Supply no momento da efetivação dos serviços objetos do presente instrumento, compreendendo todas as Normas Regulamentadoras do Ministério do Trabalho e pela legislação aplicável.\n\nParágrafo Único: A CONTRATANTE deverá atender, integralmente, a Norma Regulamentadora de n° 16, estando condicionada a prestação dos serviços ao fato de que toda a área de operação deverá abranger, no mínimo, círculo de distância do colaborador com raio de 10 metros com centro no ponto de abastecimento.')
- addp(doc,'Cláusula 4ª. A CONTRATANTE deverá armazenar os itens discriminados na cláusula primeira em instalações adequadas devidamente licenciadas pelo órgão ambiental competente, em lugar acessível à coleta, utilizando os recipientes fornecidos a título de comodato pela CONTRATADA, de modo a não contaminar o meio ambiente.')
- addp(doc,'OBRIGAÇÕES DA CONTRATADA',True,True)
- clauses={5:'É dever da CONTRATADA observar todas as normas ambientais e técnicas pertinentes à execução dos serviços, dando plena e total garantia dos mesmos e responsabilizando-se isoladamente pela qualidade dos serviços prestados, devendo reparar ou refazer qualquer serviço executado em desconformidade com as especificações, instruções e normas técnicas.',6:'É dever da CONTRATADA estar devidamente autorizada e licenciada pelos órgãos competentes para realizar as atividades objeto deste contrato.'}
- for n,t in clauses.items(): addp(doc,f'Cláusula {n}ª. {t}')
- per=d.get('periodicidade') or 'CONFORME PROGRAMAÇÃO'; fran=d.get('franquia_solidos') or '0'
- addp(doc,f"Cláusula 7ª. A CONTRATADA deverá efetuar a coleta e destinação na periodicidade {per}, em quantidade não superior a {fran} kg de todo material a ser coletado, sendo que a eventual necessidade de coleta fora da periodicidade programada ou em quantidade superior implicará no pagamento de taxa adicional, conforme condições deste instrumento.")
- for n,t in [(8,'A CONTRATADA se reserva ao direito de devolver à CONTRATANTE, sem ônus para a primeira, todo o resíduo recebido que não possa processá-lo em razão de impedimento legal ou por inviabilidade técnica ou econômica.'),(9,'A CONTRATADA deverá manter registro das ocorrências que não se enquadrem como rotina.'),(10,'A CONTRATADA deverá comunicar à CONTRATANTE, por escrito ou por meio eletrônico, quaisquer ocorrências que impeçam o cumprimento das obrigações por ela assumidas, indicando suas causas, efeitos e sugestões que devam ser tomadas.'),(11,'As partes se obrigam a obedecer às exigências, condições e determinações regulares do Órgão de Controle da Poluição Ambiental competente, responsabilizando-se, cada uma, isoladamente, pelas infrações que eventualmente cometerem.')]: addp(doc,f'Cláusula {n}ª. {t}')
- addp(doc,'Cláusula 12ª. Para a execução dos serviços, a CONTRATADA disponibilizará os recursos necessários, incluindo veículo devidamente certificado e licenciado, condutores habilitados e treinados, mão de obra capacitada, EPI’s e documentação aplicável.')
- addp(doc,'DA COLETA E DO TRANSPORTE',True,True)
- addp(doc,'Cláusula 13ª. A CONTRATADA irá realizar as coletas no período diurno, no estabelecimento da CONTRATANTE, não sendo executadas aos sábados, domingos e feriados. Caso o dia programado para coleta seja feriado, a mesma será realizada no dia útil anterior ou posterior àquela data.')
- addp(doc,'Cláusula 14ª. A CONTRATANTE se responsabilizará por acompanhar a coleta, a pesagem e o preenchimento do manifesto, dando ciência de todos os resíduos que foram coletados.')
- addp(doc,'Cláusula 15ª. Ocorrendo impossibilidade real da CONTRATADA na execução do serviço, esta deverá ser reprogramada e comunicada imediatamente à CONTRATANTE para a sua realização.')
- addp(doc,'DO PREÇO E DAS CONDIÇÕES DE PAGAMENTO',True,True)
- preco=[f"- {money(d.get('valor_faturamento'))} referente ao serviço na periodicidade {per}."]
- for key,label,un in [('valor_excedente','material coletado excedente','kg'),('valor_terra','terra, serragem e graxa','kg'),('valor_agua','água coletada','litro'),('valor_lampada','lâmpada coletada','unidade')]:
-  if d.get(key): preco.append(f"- {money(d[key])} por {un} de {label}.")
- if d.get('deslocamento'): preco.append(f"- {money(d['deslocamento'])} referente a deslocamento, quando aplicável.")
- if d.get('outros_valores'): preco.append(f"- Outros valores: {d['outros_valores']}.")
- pag=f"Tipo de prazo: {d.get('tipo_prazo','')}; prazo/dia fixo: {d.get('prazo_dia_fixo','')}; parcela: {d.get('parcela','')}; dia limite de faturamento: {d.get('dia_limite_faturamento','')}."
- addp(doc,'Cláusula 16ª. A CONTRATANTE pagará à CONTRATADA, mediante cobrança, a título de remuneração pelos serviços avençados por este instrumento, os seguintes valores:\n'+'\n'.join(preco)+'\n'+pag)
- addp(doc,'Parágrafo Primeiro: O atraso no pagamento de toda e qualquer fatura obrigará a CONTRATANTE ao pagamento do principal acrescido de multa contratual de 2% (dois por cento), além de juros de 1,0% (um por cento) ao mês, sobre o total do débito.\nParágrafo Segundo: A remuneração inclui o tratamento e a disposição final dos resíduos resultantes do processamento, de modo a atender às exigências dos órgãos ambientais competentes.\nParágrafo Terceiro: Eventuais tributos e contribuições que venham a ser criados ou elevados serão objeto de repasse para os custos.\nParágrafo Quarto: A CONTRATADA emitirá Nota Fiscal Eletrônica e a remeterá para o e-mail '+(d.get('email_nfe') or '[E-MAIL NF-e]')+'.\nParágrafo Quinto: Se o boleto bancário não puder ser pago e a CONTRATADA autorizar pagamento por depósito, poderão ser aplicadas as despesas bancárias pertinentes.\nParágrafo Sexto: O valor da remuneração será reajustado automaticamente a cada 12 (doze) meses através da aplicação do índice IGP-M ou outro índice ou reajuste pertinente.')
- addp(doc,'Cláusula 17ª. No que se refere à incidência do Imposto Sobre Serviços - ISS, a CONTRATANTE deverá observar rigorosamente os dispositivos legais que tratam da incidência e eventual retenção, sendo que a exigência ou retenção indevida do tributo implicará no repasse do valor para o preço do serviço.')
- addp(doc,'DA RESCISÃO',True,True)
- for n,t in [(18,'No caso de descumprimento de qualquer das cláusulas deste instrumento, a parte que não cumpriu deverá pagar multa correspondente ao valor dos serviços nos últimos três meses anteriores à infração contratual, além de ensejar a rescisão contratual motivada.'),(19,'O descumprimento de qualquer das cláusulas deste instrumento permite à parte lesada a rescisão contratual motivada, bastando para tanto a notificação da parte contrária, que produzirá efeitos imediatos.'),(20,'Poderá o presente instrumento ser rescindido por qualquer uma das partes, em qualquer momento, sem motivo relevante, devendo a outra parte ser avisada previamente por escrito, no prazo de 30 (trinta) dias.'),(21,'Caso a CONTRATANTE já tenha realizado o pagamento pelo serviço e requisite a rescisão imotivada, terá o valor da quantia paga devolvido, deduzindo-se 10% de taxas administrativas e impostos recolhidos.'),(22,'Caso seja a CONTRATADA quem requeira a rescisão imotivada, deverá devolver a quantia referente aos serviços não prestados à CONTRATANTE, acrescida de 2% de taxas administrativas.')]: addp(doc,f'Cláusula {n}ª. {t}')
- addp(doc,'DO PRAZO',True,True); addp(doc,'Cláusula 23ª. O presente contrato é por prazo indeterminado iniciando-se no momento e na data da assinatura do mesmo.')
- addp(doc,'DAS CONDIÇÕES GERAIS',True,True); addp(doc,'Cláusula 24ª. Salvo com a expressa autorização da CONTRATANTE, não pode a CONTRATADA transferir ou subcontratar os serviços previstos neste instrumento, sob o risco de ocorrer a rescisão imediata.'); addp(doc,'Cláusula 25ª. A CONTRATADA emitirá o Certificado de Tratamento e Disposição Final de Resíduos, no qual constará a quantidade tratada no período correspondente, sendo enviado ao cliente no prazo de 90 dias.')
- addp(doc,'DO FORO',True,True); addp(doc,'Cláusula 26ª. Para dirimir quaisquer controvérsias oriundas do presente contrato, as partes elegem o foro da comarca de Campo Grande/MS.')
- local=d.get('cidade') or 'Cuiabá'; addp(doc,f"{local}, {datetime.now().strftime('%d/%m/%Y')}.",False,True); addp(doc,'Por estarem assim justos e contratados, firmam o presente instrumento em 02 (duas) vias de igual teor, juntamente com 02 (duas) testemunhas.',False,True)
- addp(doc,'\n________________________________________\nECOSUPPLY RECICLADORA LTDA\nCONTRATADA',False,True); addp(doc,f"\n________________________________________\n{d.get('razao_social','')}\nCONTRATANTE",False,True)
- doc.save(path)
+def configure():
+    if AUTH_FILE.exists() or (os.environ.get('DASHBOARD_USER') and os.environ.get('DASHBOARD_PASSWORD_HASH')):
+        return
+    print('Primeiro acesso: crie um usuário local para este painel.')
+    user = input('Usuário: ').strip()
+    if not user:
+        raise SystemExit('Informe um usuário.')
+    password = getpass.getpass('Senha (mínimo 12 caracteres): ')
+    if len(password) < 12 or password != getpass.getpass('Confirme a senha: '):
+        raise SystemExit('Senha curta ou confirmação diferente. Execute novamente.')
+    AUTH_FILE.parent.mkdir(exist_ok=True)
+    with os.fdopen(os.open(AUTH_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w', encoding='utf-8') as f:
+        json.dump({'user': user, 'hash': generate_password_hash(password)}, f)
 
-
-def authorized(id):
-    return id in session.get('authorized_contracts', [])
-
-def protect(id):
-    if not authorized(id):
-        flash('Informe a senha para acessar as ações deste contrato.')
-        return redirect(url_for('acesso', id=id))
-    return None
-
-def _set_cell_margins(cell, top=0, start=0, bottom=0, end=0):
- tc=cell._tc; tcPr=tc.get_or_add_tcPr(); tcMar=tcPr.first_child_found_in('w:tcMar')
- if tcMar is None:
-  tcMar=OxmlElement('w:tcMar'); tcPr.append(tcMar)
- for m,v in [('top',top),('start',start),('bottom',bottom),('end',end)]:
-  node=tcMar.find(qn('w:'+m))
-  if node is None: node=OxmlElement('w:'+m); tcMar.append(node)
-  node.set(qn('w:w'),str(v)); node.set(qn('w:type'),'dxa')
-
-def _set_bottom_border(paragraph):
- pPr=paragraph._p.get_or_add_pPr(); pBdr=OxmlElement('w:pBdr'); bottom=OxmlElement('w:bottom')
- bottom.set(qn('w:val'),'single'); bottom.set(qn('w:sz'),'18'); bottom.set(qn('w:space'),'1'); bottom.set(qn('w:color'),'000000')
- pBdr.append(bottom); pPr.append(pBdr)
-
-def doc_header(section, filial=''):
- f=filial_data(filial); header=section.header
- header.is_linked_to_previous=False
- t=header.add_table(rows=1, cols=2, width=Cm(17.6)); t.autofit=False
- t.columns[0].width=Cm(10.4); t.columns[1].width=Cm(7.2)
- for c in t.rows[0].cells: c.vertical_alignment=WD_CELL_VERTICAL_ALIGNMENT.CENTER; _set_cell_margins(c,0,0,0,0)
- p=t.cell(0,0).paragraphs[0]; p.alignment=WD_ALIGN_PARAGRAPH.LEFT
- logo=BASE/'static'/'logo_ecosupply.png'
- if logo.exists(): p.add_run().add_picture(str(logo), width=Cm(6.5))
- p2=t.cell(0,1).paragraphs[0]; p2.alignment=WD_ALIGN_PARAGRAPH.LEFT; p2.paragraph_format.space_after=Pt(0); p2.paragraph_format.line_spacing=0.92
- for i,line in enumerate(f['cabecalho']):
-  rr=p2.add_run(line + ('\n' if i < len(f['cabecalho'])-1 else '')); rr.font.name='Arial'; rr.font.size=Pt(6.5); rr.bold=(i==0); rr.italic=(filial_key(filial)=='CAMPO_GRANDE')
- linep=header.add_paragraph(); linep.paragraph_format.space_before=Pt(1); linep.paragraph_format.space_after=Pt(0); _set_bottom_border(linep)
-
-def doc_footer(section):
-    f=section.footer; p=f.paragraphs[0]; p.alignment=WD_ALIGN_PARAGRAPH.CENTER
-    r=p.add_run('ECOSUPPLY RECICLADORA LTDA  |  Contrato de Prestação de Serviços')
-    r.font.name='Arial'; r.font.size=Pt(7)
-
-def build_doc_v4(r,path):
- d=dict(r); f=filial_data(d.get('faturado_por')); doc=Document(); sec=doc.sections[0]
- sec.top_margin=Cm(2.95); sec.bottom_margin=Cm(1.35); sec.left_margin=Cm(1.55); sec.right_margin=Cm(1.55); sec.header_distance=Cm(.45); sec.footer_distance=Cm(.55)
- doc_header(sec,d.get('faturado_por')); doc_footer(sec)
- normal=doc.styles['Normal']; normal.font.name='Arial'; normal._element.rPr.rFonts.set(qn('w:eastAsia'),'Arial'); normal.font.size=Pt(9.1)
- normal.paragraph_format.space_after=Pt(4.0); normal.paragraph_format.line_spacing=1.0
- def p(text='',bold=False,center=False,after=4.0,before=0,keep=False,left=False):
-  x=doc.add_paragraph(); x.alignment=WD_ALIGN_PARAGRAPH.CENTER if center else (WD_ALIGN_PARAGRAPH.LEFT if left else WD_ALIGN_PARAGRAPH.JUSTIFY)
-  x.paragraph_format.space_after=Pt(after); x.paragraph_format.space_before=Pt(before); x.paragraph_format.line_spacing=1.0; x.paragraph_format.keep_together=keep
-  rr=x.add_run(text); rr.bold=bold; rr.font.name='Arial'; rr.font.size=Pt(9.1); return x
- def H(text): return p(text,True,False,3.5,2.5,True)
- # title aligned right as in the reference PDFs
- tbl=doc.add_table(rows=1,cols=2); tbl.autofit=False; tbl.columns[0].width=Cm(10.2); tbl.columns[1].width=Cm(7.2)
- for c in tbl.rows[0].cells: _set_cell_margins(c,0,0,0,0)
- tp=tbl.cell(0,1).paragraphs[0]; tp.alignment=WD_ALIGN_PARAGRAPH.JUSTIFY; tp.paragraph_format.space_after=Pt(5); tp.paragraph_format.line_spacing=.95
- tr=tp.add_run(f"INSTRUMENTO PARTICULAR DE CONTRATO DE PRESTAÇÃO DE SERVIÇOS DE RETIRADA, DECOMPOSIÇÃO, TRATAMENTO E DESCARTE, FIRMADO ENTRE {f['nome']} E {d.get('razao_social','').upper()}"); tr.bold=True; tr.font.name='Arial'; tr.font.size=Pt(8.7)
- H('IDENTIFICAÇÃO DAS PARTES CONTRATANTES')
- p(f"{d.get('razao_social','').upper()}, pessoa jurídica/pessoa física de direito privado com sede em {d.get('cidade','').upper()}, Estado de {d.get('uf','')}, na {d.get('endereco','')}, nº {d.get('numero','')} - Bairro {d.get('bairro','')} - CEP: {d.get('cep','')}, inscrita no CPF/CNPJ sob n.º {d.get('cpf_cnpj','')} e Inscrição Estadual n.º {d.get('ie','')}, neste ato representada por {d.get('responsavel','')}, portador(a) do RG n.º {d.get('rg','')} e CPF n.º {d.get('cpf_responsavel','')}, doravante denominada CONTRATANTE e")
- p(filial_text(d.get('faturado_por')))
- p('As partes acima identificadas têm, entre si, justo e acertado o presente Contrato de Prestação de Serviços, que se regerá pelas cláusulas seguintes e pelas condições de preço, forma e termo de pagamento descritas no presente.')
- H('DO OBJETO DO CONTRATO'); residuos=d.get('observacoes') or 'resíduos sólidos classe I e classe II conforme cadastro e caracterização fornecida pela CONTRATANTE'
- p('Cláusula 1ª. É objeto do presente contrato a prestação dos serviços de;')
- p(f'A) Serviço de coleta, triagem e envio para co-processamento de resíduos sólidos classe I e classe II, em especial: {residuos}')
- p('B) Fornecimento a título de comodato, sem custo adicional, de:',after=1.5)
- kits=[]
- for i in range(1,6):
-  if d.get(f'kit_emb_{i}') and d.get(f'kit_qtd_{i}'):
-   cor=f" - cor {d.get(f'kit_cor_{i}')}" if d.get(f'kit_cor_{i}') else ''
-   kits.append(f"- {d[f'kit_qtd_{i}']} unidade(s) de {d[f'kit_emb_{i}']}{cor};")
- p('\n'.join(kits) if kits else '- Não há kit de coleta/comodato informado.',left=True)
- p('C) Transporte dos resíduos em caminhão licenciado para transporte de carga perigosa e com motorista habilitado com MOPP.')
- p('D) Destinação ambientalmente adequada de todos os resíduos coletados.')
- p('Parágrafo único – Caberá à CONTRATANTE providenciar às suas expensas, quando se fizer necessário, a caracterização dos resíduos de que trata esta Cláusula, através de análises completas executadas em entidades ou laboratórios de reconhecida capacidade técnica, conforme técnicas e métodos estabelecidos pela Norma Técnica, Legal ou Regulamentar pertinente, fornecendo, à CONTRATADA, cópia do laudo assinado por profissional competente.')
- H('OBRIGAÇÕES DA CONTRATANTE')
- p('Cláusula 2ª. A CONTRATANTE deverá abster-se de transferir para os locais de coleta quaisquer dos itens enumerados na cláusula primeira originados de outros estabelecimentos geradores, ainda que da mesma empresa ou grupo econômico.')
- p('Parágrafo Primeiro – Para fins deste instrumento, consideram-se “geradores” as pessoas físicas ou jurídicas que, em decorrência de sua atividade, gerem óleos lubrificantes usados ou contaminados, resíduos oleosos, estopas, embalagens, filtros de óleo e EPI´s contaminados com derivados de petróleo.')
- mtr=(d.get('emite_mtr') or '').upper()
- if 'CLIENTE' in mtr or 'CONTRATANTE' in mtr: p('Parágrafo Segundo – Compete ao CONTRATANTE/GERADOR a responsabilidade pela emissão do Manifesto de Transporte de Resíduos – MTR, por meio do SINIR – Sistema Nacional de Informações sobre a Gestão dos Resíduos Sólidos, para cada remessa de resíduos destinada à coleta e/ou destinação, nos termos da legislação vigente.')
- else: p('Parágrafo Segundo – Caso o CONTRATANTE/GERADOR opte pela operacionalização da emissão dos MTRs pela CONTRATADA, deverá cadastrá-la no SINIR com perfil de Administrador. O perfil de Administrador e as respectivas permissões serão utilizados pela CONTRATADA EXCLUSIVAMENTE para as atividades relacionadas à operacionalização de emissão dos MTRs das coletas realizadas pela ECOSUPPLY, mantendo com obrigatoriedade da CONTRATANTE todas as demais obrigações ambientais vinculadas a geração de resíduos e envio de declarações aos órgãos reguladores.')
- p('Cláusula 3ª. A CONTRATANTE deverá fornecer condições mínimas para atender a Segurança do Trabalho ao colaborador da Supply no momento da efetivação dos serviços objetos do presente instrumento, compreendendo todas as Normas Regulamentadoras do Ministério do Trabalho e pela legislação aplicável.\n\nParágrafo Único: A CONTRATANTE deverá atender, integralmente, a Norma Regulamentadora de n° 16, estando condicionada a prestação dos serviços ao fato de que toda a área de operação deverá abranger, no mínimo, círculo de distância do colaborador com raio de 10 metros com centro no ponto de abastecimento.')
- p('Cláusula 4ª. A CONTRATANTE deverá armazenar os itens discriminados na cláusula primeira em instalações adequadas devidamente licenciadas pelo órgão ambiental competente, em lugar acessível à coleta, utilizando os recipientes fornecidos a título de comodato pela CONTRATADA, de modo a não contaminar o meio ambiente.')
- H('OBRIGAÇÕES DA CONTRATADA')
- p('Cláusula 5ª. É dever da CONTRATADA observar todas as normas ambientais e técnicas pertinentes a execução dos serviços, dando plena e total garantia dos mesmos e responsabilizando-se isoladamente pela qualidade dos serviços prestados, devendo reparar ou refazer qualquer serviço que porventura for executado em desconformidade com as especificações, instruções e normas técnicas.')
- p('Cláusula 6ª. É dever da CONTRATADA estar devidamente autorizada pelo órgão regulador da indústria do petróleo e licenciada pelo órgão ambiental competente para realizar atividade de coleta e destinação de óleo lubrificante usado ou contaminado, limpeza de caixa separadora, coleta de resíduos oleosos, estopas, embalagens, filtros de óleo e EPI´S usados contaminados com derivados de petróleo.')
- per=d.get('periodicidade') or 'CONFORME PROGRAMAÇÃO'; fran=d.get('franquia_solidos') or '0'
- p(f'Cláusula 7ª. A CONTRATADA deverá efetuar a coleta e destinação na periodicidade {per}, em quantidade não superior a {fran} kg de todo material a ser coletado ({residuos}), sendo que a eventual necessidade de coleta fora da periodicidade programada ou em quantidade superior, implicará no pagamento de taxa adicional, cujo valor será fixado de acordo com o serviço a ser executado.')
- for n,t in [(8,'A CONTRATADA se reserva ao direito de devolver à CONTRATANTE, sem ônus para a primeira, todo o resíduo recebido que não possa processá-lo em razão de impedimento legal ou por inviabilidade técnica ou econômica.'),(9,'A CONTRATADA deverá manter em seu escritório de fábrica, um “livro de ocorrências” onde deverão ser escriturados todos os fatos que não se enquadrem como rotina.'),(10,'A CONTRATADA deverá comunicar à CONTRATANTE, por escrito ou por meio eletrônico, quaisquer ocorrências que impeçam o cumprimento das obrigações por ela aqui assumidas, indicando suas causas, ou efeitos e sugestões que devam ser tomadas.'),(11,'As partes “de per si”, se obrigam a obedecer as exigências, condições e determinações regulares do Órgão de Controle da Poluição Ambiental competente, responsabilizando-se, cada uma, isoladamente, pelas infrações que eventualmente cometerem.')]: p(f'Cláusula {n}ª. {t}')
- p('Cláusula 12ª. Para a execução dos serviços, a CONTRATADA disponibilizará os seguintes recursos:\nA) 01 caminhão Baú ou Rollon devidamente certificado e licenciado para transporte de Produtos Perigosos (INMETRO), condutores habilitados e treinados (MOPP) e contrato com empresa de atendimento emergencial, além de seguro ambiental da carga transportada;\nB) Mão de obra disponibilizada: Operadores habilitados e treinados (MOPP, NR-33, NR-35);\nC) EPI’s necessários para a realização dos serviços;\nD) Documentação: Check-List e Certificado de Coleta de Resíduos.')
- H('DA COLETA E DO TRANSPORTE')
- p('Cláusula 13ª. A CONTRATADA irá realizar as coletas no período diurno, no estabelecimento da CONTRATANTE, não sendo executadas aos sábados, domingos e feriados. Caso o dia programado para coleta for feriado, a mesma será realizada no dia útil anterior ou posterior àquela data.')
- p('Cláusula 14ª. A CONTRATANTE se responsabilizará de acompanhar a coleta, a pesagem, e o preenchimento do manifesto, assinando e dando ciência de todos os resíduos que foram coletados.')
- p('Cláusula 15ª. Ocorrendo impossibilidade real da CONTRATADA na execução do serviço, esta deverá ser reprogramada e comunicada imediatamente à CONTRATANTE para a sua realização. Neste caso, não será cobrado da CONTRATANTE valores correspondentes às quantidades excedentes e se não for possível realizar a coleta dentro do período, também não será cobrada a mensalidade correspondente.')
- H('DO PREÇO E DAS CONDIÇÕES DE PAGAMENTO')
- p('Cláusula 16ª. A CONTRATANTE pagará à CONTRATADA, mediante boleto bancário a título de remuneração pelos serviços avençados por este instrumento a importância de:')
- def moeda(v):
-  z=str(v or '').strip(); return ('R$ '+z.replace('R$','').strip()) if z else ''
- if d.get('valor_faturamento'): p(f"- {moeda(d.get('valor_faturamento'))} referente ao serviço na periodicidade {per}.")
- for key,label in [('valor_excedente','por kg de material coletado excedente ao contratado'),('valor_terra','por kg de terra, serragem, graxa contaminados com derivados de petróleo'),('valor_agua','por litro de água'),('valor_lampada','por unidade de lâmpada')]:
-  if d.get(key): p(f"- {moeda(d[key])} {label}, sendo que esse resíduo não faz parte da franquia mencionada na cláusula 7ª deste instrumento.")
- if d.get('outros_valores'): p(f"- Outros valores: {d['outros_valores']}.")
- venc=d.get('prazo_dia_fixo') or d.get('dia_limite_faturamento') or ''
- p(f"Devendo esses valores serem faturados conforme as condições comerciais cadastradas{(' e com vencimento no dia '+venc) if venc else ''}.")
- p('Parágrafo Primeiro: O atraso no pagamento de toda e qualquer fatura obrigará a Contratante no pagamento do principal acrescido de multa contratual de 2% (dois por cento) após atraso, além de juros de 1,0% (um por cento) ao mês, sobre o total do débito.\nI - O percentual estabelecido neste Parágrafo, a título de multa, poderá ser reavaliado em caso de alteração significativa da taxa de inflação mensal que se verifica nesta data.\nII - Em caso de cobrança judicial, devem ser acrescidas custas processuais e 20% de honorários advocatícios.')
- p('Parágrafo Segundo: A remuneração de que trata o “caput” desta Cláusula inclui o tratamento e a disposição final do efluente líquido e do resíduo sólido resultantes do processamento do resíduo de que trata a Cláusula Primeira deste Contrato, de modo a atender as exigências dos órgãos de meio ambiente competentes.')
- p('Parágrafo Terceiro: Eventuais tributos e contribuições de qualquer natureza que porventura venham a ser criadas ou elevadas serão objeto de repasse para os custos.')
- p(f"Parágrafo Quarto: A CONTRATADA emitirá Nota Fiscal Eletrônica atendendo determinação da legislação tributária e a remeterá para a CONTRATANTE no e-mail: {d.get('email_nfe') or '[E-MAIL NF-e]'}, o qual será instrumento hábil e regular para o recebimento do documento fiscal, sendo que a comprovação de entrega da nota se dará pela simples remessa do e-mail.")
- p('Parágrafo Quinto: Se por algum motivo o boleto bancário não puder ser pago e a CONTRATADA autorizar o pagamento por depósito bancário, deverá ser acrescido no valor do depósito bancário o valor correspondente à baixa bancária de título.')
- p('Parágrafo Sexto: O valor da remuneração estabelecido no “caput” será reajustado automaticamente a cada 12 (doze) meses através da aplicação do índice IGP-M ou outro índice ou reajuste pertinente.')
- p('Cláusula 17ª. No que se refere a incidência do Imposto Sobre Serviços - ISS, a CONTRATANTE deverá observar rigorosamente os dispositivos legais que tratam da incidência e eventual retenção, sendo que a exigência ou retenção indevida do tributo implicará no repasse do valor para o preço do serviço.')
- p('Cláusula 18ª. No caso de descumprimento de qualquer das cláusulas deste instrumento, a parte que não cumpriu deverá pagar multa correspondente ao valor dos serviços nos últimos três meses anteriores a infração contratual, além de ensejar a rescisão contratual motivada.')
- p('Cláusula 19ª. O descumprimento de qualquer das cláusulas deste instrumento permite à parte lesada a rescisão contratual motivada, bastando para tanto a notificação da parte contrária, que produzirá efeitos imediatos.')
- H('DA RESCISÃO IMOTIVADA')
- p('Cláusula 20ª. Poderá o presente instrumento ser rescindido por qualquer uma das partes, em qualquer momento, sem que haja qualquer tipo de motivo relevante, não obstante a outra parte deverá ser avisada previamente por escrito, no prazo de 30 (trinta) dias.')
- p('Cláusula 21ª. Caso a CONTRATANTE já tenha realizado o pagamento pelo serviço, e mesmo assim, requisite a rescisão imotivada do presente contrato, terá o valor da quantia paga devolvido, deduzindo-se 10% de taxas administrativas e impostos recolhidos.')
- p('Cláusula 22ª. Caso seja a CONTRATADA quem requeira a rescisão imotivada, deverá devolver a quantia que se refere aos serviços por ele não prestados a CONTRATANTE, acrescentado de 2% de taxas administrativas.')
- H('DO PRAZO'); p('Cláusula 23ª. O presente contrato é por prazo indeterminado iniciando-se no momento e na data da assinatura do mesmo.')
- H('DAS CONDIÇÕES GERAIS'); p('Cláusula 24ª. Salvo com a expressa autorização da CONTRATANTE, não pode a CONTRATADA transferir ou subcontratar os serviços previstos neste instrumento, sob o risco de ocorrer a rescisão imediata.'); p('Cláusula 25ª. A CONTRATADA emitirá o Certificado de Tratamento e Disposição final de Resíduos, no qual constará a quantidade tratada no período correspondente, sendo enviado ao cliente no prazo de 90 dias.')
- H('DO FORO'); p(f"Cláusula 26ª. Para dirimir quaisquer controvérsias oriundas do presente contrato, as partes elegem o foro da comarca de {f['foro']}.")
- p('Por estarem assim justos e contratados, firmam o presente instrumento em 02 (duas) vias de igual teor, juntamente com 02 (duas) testemunhas.')
- meses=['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro']; now=datetime.now(); p(f"{f['cidade']}-{f['uf']}, {now.day} de {meses[now.month-1]} de {now.year}.")
- sig=doc.add_table(rows=1,cols=2); sig.autofit=False; sig.columns[0].width=Cm(8.7); sig.columns[1].width=Cm(8.7)
- for idx,(name,role) in enumerate([(f['nome'],'CONTRATADA'),(d.get('razao_social','').upper(),'CONTRATANTE')]):
-  cc=sig.cell(0,idx); _set_cell_margins(cc,0,40,0,40); pp=cc.paragraphs[0]; pp.alignment=WD_ALIGN_PARAGRAPH.CENTER; rr=pp.add_run('\n\n________________________________\n'+role+'\n'+name); rr.bold=True; rr.font.name='Arial'; rr.font.size=Pt(8.4)
- doc.save(path)
-
-def build_pdf_v4(r,path):
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak, KeepTogether
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_JUSTIFY, TA_CENTER, TA_LEFT
-    from reportlab.lib import colors
-    from reportlab.lib.units import cm
-    d=dict(r); f=filial_data(d.get('faturado_por')); styles=getSampleStyleSheet()
-    body=ParagraphStyle('Body',parent=styles['Normal'],fontName='Helvetica',fontSize=8.5,leading=11,alignment=TA_JUSTIFY,spaceAfter=5)
-    head=ParagraphStyle('Head',parent=body,fontName='Helvetica-Bold',spaceBefore=4,spaceAfter=5)
-    center=ParagraphStyle('Center',parent=body,alignment=TA_CENTER,fontName='Helvetica-Bold')
-    def esc(s):
-        import html; return html.escape(str(s or '')).replace('\n','<br/>')
-    def header_footer(canvas,doc):
-        canvas.saveState(); w,h=A4
-        logo=BASE/'static'/'logo_ecosupply.png'
-        if logo.exists(): canvas.drawImage(str(logo),1.7*cm,h-2.4*cm,width=6.8*cm,height=1.5*cm,preserveAspectRatio=True,mask='auto')
-        canvas.setFont('Helvetica-Bold',7); canvas.drawString(11.2*cm,h-1.25*cm,f['cabecalho'][0])
-        canvas.setFont('Helvetica',6.2); yy=h-1.55*cm
-        for line in f['cabecalho'][1:4]: canvas.drawString(11.2*cm,yy,line); yy-=0.22*cm
-        canvas.setLineWidth(1.5); canvas.line(1.7*cm,h-2.7*cm,w-1.7*cm,h-2.7*cm)
-        canvas.setFont('Helvetica',6.5); canvas.drawCentredString(w/2,.8*cm,f"{f['nome']}  |  Contrato de Prestação de Serviços  |  Página {doc.page}")
-        canvas.restoreState()
-    pdf=SimpleDocTemplate(str(path),pagesize=A4,rightMargin=1.7*cm,leftMargin=1.7*cm,topMargin=3.1*cm,bottomMargin=1.3*cm)
-    story=[]
-    title=f"INSTRUMENTO PARTICULAR DE CONTRATO DE PRESTAÇÃO DE SERVIÇOS DE RETIRADA, DECOMPOSIÇÃO, TRATAMENTO E DESCARTE, FIRMADO ENTRE {f['nome']} E {esc(d.get('razao_social','').upper())}"
-    story.append(Table([['',Paragraph(title,head)]],colWidths=[10.7*cm,6.2*cm],style=[('VALIGN',(0,0),(-1,-1),'TOP')]))
-    def H(x): story.append(Paragraph(esc(x),head))
-    def P(x): story.append(Paragraph(esc(x),body))
-    H('IDENTIFICAÇÃO DAS PARTES CONTRATANTES')
-    P(f"{d.get('razao_social','').upper()}, pessoa jurídica/pessoa física de direito privado com sede em {d.get('cidade','').upper()}, Estado de {d.get('uf','')}, na {d.get('endereco','')}, nº {d.get('numero','')} - Bairro {d.get('bairro','')} - CEP: {d.get('cep','')}, inscrita no CPF/CNPJ sob n.º {d.get('cpf_cnpj','')} e Inscrição Estadual n.º {d.get('ie','')}, neste ato representada por {d.get('responsavel','')}, portador(a) do RG n.º {d.get('rg','')} e CPF n.º {d.get('cpf_responsavel','')}, doravante denominada CONTRATANTE e")
-    P(filial_text(d.get('faturado_por'))); P('As partes acima identificadas têm, entre si, justo e acertado o presente Contrato de Prestação de Serviços, que se regerá pelas cláusulas seguintes e pelas condições de preço, forma e termo de pagamento descritas no presente.')
-    H('DO OBJETO DO CONTRATO'); residuos=d.get('observacoes') or 'resíduos sólidos classe I e classe II conforme cadastro e caracterização fornecida pela CONTRATANTE'
-    P(f"Cláusula 1ª. É objeto do presente contrato a prestação dos serviços de;\nA) Serviço de coleta, triagem e envio para co-processamento/tratamento de resíduos sólidos classe I e classe II, em especial: {residuos}\nB) Fornecimento a título de comodato, sem custo adicional, de:")
-    kits=[]
-    for i in range(1,6):
-        if d.get(f'kit_emb_{i}') and d.get(f'kit_qtd_{i}'): kits.append(f"- {d[f'kit_qtd_{i}']} unidade(s) de {d[f'kit_emb_{i}']} - cor {d.get(f'kit_cor_{i}','')};")
-    P('\n'.join(kits) if kits else '- Não há kit de coleta/comodato informado.')
-    P('C) Transporte dos resíduos em caminhão licenciado para transporte de carga perigosa e com motorista habilitado com MOPP.\nD) Destinação ambientalmente adequada de todos os resíduos coletados.')
-    P('Parágrafo único – Caberá à CONTRATANTE providenciar às suas expensas, quando se fizer necessário, a caracterização dos resíduos de que trata esta Cláusula, através de análises completas executadas em entidades ou laboratórios de reconhecida capacidade técnica, conforme técnicas e métodos estabelecidos pela Norma Técnica, Legal ou Regulamentar pertinente, fornecendo, à CONTRATADA, cópia do laudo assinado por profissional competente.')
-    H('OBRIGAÇÕES DA CONTRATANTE'); P('Cláusula 2ª. A CONTRATANTE deverá abster-se de transferir para os locais de coleta quaisquer dos itens enumerados na cláusula primeira originados de outros estabelecimentos geradores, ainda que da mesma empresa ou grupo econômico.')
-    P('Parágrafo Primeiro – Para fins deste instrumento, consideram-se “geradores” as pessoas físicas ou jurídicas que, em decorrência de sua atividade, gerem óleos lubrificantes usados ou contaminados, resíduos oleosos, estopas, embalagens, filtros de óleo e EPI´s contaminados com derivados de petróleo.')
-    if 'CLIENTE' in (d.get('emite_mtr') or '').upper() or 'CONTRATANTE' in (d.get('emite_mtr') or '').upper(): P('Parágrafo Segundo – Compete ao CONTRATANTE/GERADOR a responsabilidade pela emissão do Manifesto de Transporte de Resíduos – MTR, por meio do SINIR – Sistema Nacional de Informações sobre a Gestão dos Resíduos Sólidos, para cada remessa de resíduos destinada à coleta e/ou destinação, nos termos da legislação vigente.')
-    else: P('Parágrafo Segundo – Caso o CONTRATANTE/GERADOR opte pela operacionalização da emissão dos MTRs pela CONTRATADA, deverá cadastrá-la no SINIR com perfil e permissões necessárias, permanecendo com a CONTRATANTE as demais obrigações ambientais vinculadas à geração de resíduos e envio de declarações aos órgãos reguladores.')
-    P('Cláusula 3ª. A CONTRATANTE deverá fornecer condições mínimas para atender a Segurança do Trabalho ao colaborador da Supply no momento da efetivação dos serviços objetos do presente instrumento, compreendendo todas as Normas Regulamentadoras do Ministério do Trabalho e pela legislação aplicável.\n\nParágrafo Único: A CONTRATANTE deverá atender, integralmente, a Norma Regulamentadora de n° 16, estando condicionada a prestação dos serviços ao fato de que toda a área de operação deverá abranger, no mínimo, círculo de distância do colaborador com raio de 10 metros com centro no ponto de abastecimento.'); P('Cláusula 4ª. A CONTRATANTE deverá armazenar os itens discriminados na cláusula primeira em instalações adequadas devidamente licenciadas pelo órgão ambiental competente, em lugar acessível à coleta, utilizando os recipientes fornecidos a título de comodato pela CONTRATADA, de modo a não contaminar o meio ambiente.')
-    H('OBRIGAÇÕES DA CONTRATADA')
-    texts=[(5,'É dever da CONTRATADA observar todas as normas ambientais e técnicas pertinentes a execução dos serviços, dando plena e total garantia dos mesmos e responsabilizando-se isoladamente pela qualidade dos serviços prestados, devendo reparar ou refazer qualquer serviço que porventura for executado em desconformidade com as especificações, instruções e normas técnicas.'),(6,'É dever da CONTRATADA estar devidamente autorizada pelo órgão regulador e licenciada pelo órgão ambiental competente para realizar as atividades objeto deste contrato.')]
-    for n,t in texts:P(f'Cláusula {n}ª. {t}')
-    per=d.get('periodicidade') or 'CONFORME PROGRAMAÇÃO'; fran=d.get('franquia_solidos') or '0'; P(f'Cláusula 7ª. A CONTRATADA deverá efetuar a coleta e destinação na periodicidade {per}, em quantidade não superior a {fran} kg de todo material a ser coletado ({residuos}), sendo que a eventual necessidade de coleta fora da periodicidade programada ou em quantidade superior implicará no pagamento de taxa adicional, cujo valor será fixado de acordo com o serviço a ser executado.')
-    for n,t in [(8,'A CONTRATADA se reserva ao direito de devolver à CONTRATANTE, sem ônus para a primeira, todo o resíduo recebido que não possa processá-lo em razão de impedimento legal ou por inviabilidade técnica ou econômica.'),(9,'A CONTRATADA deverá manter em seu escritório de fábrica, um “livro de ocorrências” onde deverão ser escriturados todos os fatos que não se enquadrem como rotina.'),(10,'A CONTRATADA deverá comunicar à CONTRATANTE, por escrito ou por meio eletrônico, quaisquer ocorrências que impeçam o cumprimento das obrigações por ela aqui assumidas, indicando suas causas, ou efeitos e sugestões que devam ser tomadas.'),(11,'As partes “de per si”, se obrigam a obedecer as exigências, condições e determinações regulares do Órgão de Controle da Poluição Ambiental competente, responsabilizando-se, cada uma, isoladamente, pelas infrações que eventualmente cometerem.')]:P(f'Cláusula {n}ª. {t}')
-    P('Cláusula 12ª. Para a execução dos serviços, a CONTRATADA disponibilizará os seguintes recursos:\nA) 01 caminhão Baú ou Rollon devidamente certificado e licenciado para transporte de Produtos Perigosos (INMETRO), condutores habilitados e treinados (MOPP) e contrato com empresa de atendimento emergencial, além de seguro ambiental da carga transportada;\nB) Mão de obra disponibilizada: Operadores habilitados e treinados (MOPP, NR-33, NR-35);\nC) EPI’s necessários para a realização dos serviços;\nD) Documentação: Check-List e Certificado de Coleta de Resíduos.')
-    H('DA COLETA E DO TRANSPORTE'); P('Cláusula 13ª. A CONTRATADA irá realizar as coletas no período diurno, no estabelecimento da CONTRATANTE, não sendo executadas aos sábados, domingos e feriados. Caso o dia programado para coleta for feriado, a mesma será realizada no dia útil anterior ou posterior àquela data.'); P('Cláusula 14ª. A CONTRATANTE se responsabilizará de acompanhar a coleta, a pesagem, e o preenchimento do manifesto, assinando e dando ciência de todos os resíduos que foram coletados.'); P('Cláusula 15ª. Ocorrendo impossibilidade real da CONTRATADA na execução do serviço, esta deverá ser reprogramada e comunicada imediatamente à CONTRATANTE para a sua realização.')
-    H('DO PREÇO E DAS CONDIÇÕES DE PAGAMENTO'); P('Cláusula 16ª. A CONTRATANTE pagará à CONTRATADA, mediante boleto bancário a título de remuneração pelos serviços avençados por este instrumento a importância de:')
-    def moeda(v):
-        s=str(v or '').strip(); return ('R$ '+s.replace('R$','').strip()) if s else ''
-    if d.get('valor_faturamento'):P(f'- {moeda(d.get("valor_faturamento"))} referente ao serviço na periodicidade {per}.')
-    for key,label in [('valor_excedente','por kg de material coletado excedente ao contratado'),('valor_terra','por kg de terra, serragem, graxa contaminados com derivados de petróleo'),('valor_agua','por litro de água'),('valor_lampada','por unidade de lâmpada')]:
-        if d.get(key):P(f'- {moeda(d[key])} {label}, sendo que esse resíduo não faz parte da franquia mencionada na cláusula 7ª deste instrumento.')
-    P('Parágrafo Primeiro: O atraso no pagamento de toda e qualquer fatura obrigará a Contratante no pagamento do principal acrescido de multa contratual de 2% (dois por cento) após atraso, além de juros de 1,0% (um por cento) ao mês, sobre o total do débito.\nI - O percentual estabelecido neste Parágrafo, a título de multa, poderá ser reavaliado em caso de alteração significativa da taxa de inflação mensal que se verifica nesta data.\nII - Em caso de cobrança judicial, devem ser acrescidas custas processuais e 20% de honorários advocatícios.')
-    P('Parágrafo Segundo: A remuneração de que trata o “caput” desta Cláusula inclui o tratamento e a disposição final do efluente líquido e do resíduo sólido resultantes do processamento do resíduo de que trata a Cláusula Primeira deste Contrato, de modo a atender as exigências dos órgãos de meio ambiente competentes.'); P('Parágrafo Terceiro: Eventuais tributos e contribuições de qualquer natureza que porventura venham a ser criadas ou elevadas serão objeto de repasse para os custos.'); P(f"Parágrafo Quarto: A CONTRATADA emitirá Nota Fiscal Eletrônica atendendo determinação da legislação tributária e a remeterá para a CONTRATANTE no e-mail: {d.get('email_nfe') or '[E-MAIL NF-e]'}. A adoção de AntiSpam e demais meios eletrônicos que impeçam o recebimento do e-mail são de inteira responsabilidade da CONTRATANTE."); P('Parágrafo Quinto: Se por algum motivo o boleto bancário não puder ser pago e a CONTRATADA autorizar o pagamento por depósito bancário, deverá ser acrescido o valor referente à baixa bancária de título.'); P('Parágrafo Sexto: O valor da remuneração estabelecido no “caput” será reajustado automaticamente a cada 12 (doze) meses através da aplicação do índice IGP-M ou outro índice ou reajuste pertinente.')
-    P('Cláusula 17ª. No que se refere a incidência do Imposto Sobre Serviços - ISS, a CONTRATANTE deverá observar rigorosamente os dispositivos legais que tratam da incidência e eventual retenção, sendo que a exigência ou retenção indevida do tributo implicará no repasse do valor para o preço do serviço.'); P('Cláusula 18ª. No caso de descumprimento de qualquer das cláusulas deste instrumento, a parte que não cumpriu deverá pagar multa correspondente ao valor dos serviços nos últimos três meses anteriores a infração contratual, além de ensejar a rescisão contratual motivada.'); P('Cláusula 19ª. O descumprimento de qualquer das cláusulas deste instrumento permite à parte lesada a rescisão contratual motivada, bastando para tanto a notificação da parte contrária, que produzirá efeitos imediatos.')
-    H('DA RESCISÃO IMOTIVADA'); P('Cláusula 20ª. Poderá o presente instrumento ser rescindido por qualquer uma das partes, em qualquer momento, sem que haja qualquer tipo de motivo relevante, não obstante a outra parte deverá ser avisada previamente por escrito, no prazo de 30 (trinta) dias.'); P('Cláusula 21ª. Caso a CONTRATANTE já tenha realizado o pagamento pelo serviço, e mesmo assim, requisite a rescisão imotivada do presente contrato, terá o valor da quantia paga devolvido, deduzindo-se 10% de taxas administrativas e impostos recolhidos.'); P('Cláusula 22ª. Caso seja a CONTRATADA quem requeira a rescisão imotivada, deverá devolver a quantia que se refere aos serviços por ele não prestados a CONTRATANTE, acrescentado de 2% de taxas administrativas.')
-    H('DO PRAZO'); P('Cláusula 23ª. O presente contrato é por prazo indeterminado iniciando-se no momento e na data da assinatura do mesmo.'); H('DAS CONDIÇÕES GERAIS'); P('Cláusula 24ª. Salvo com a expressa autorização da CONTRATANTE, não pode a CONTRATADA transferir ou subcontratar os serviços previstos neste instrumento, sob o risco de ocorrer a rescisão imediata.'); P('Cláusula 25ª. A CONTRATADA emitirá o Certificado de Tratamento e Disposição final de Resíduos, no qual constará a quantidade tratada no período correspondente, sendo enviado ao cliente no prazo de 90 dias.'); H('DO FORO'); P(f"Cláusula 26ª. Para dirimir quaisquer controvérsias oriundas do presente contrato, as partes elegem o foro da comarca de {f['foro']}."); P('Por estarem assim justos e contratados, firmam o presente instrumento em 02 (duas) vias de igual teor, juntamente com 02 (duas) testemunhas.')
-    meses=['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro']; now=datetime.now(); P(f"{f['cidade']}-{f['uf']}, {now.day} de {meses[now.month-1]} de {now.year}.")
-    sig=Table([[Paragraph(f"<br/><br/>________________________________<br/><b>CONTRATADA</b><br/><b>{f['nome']}</b>",center),Paragraph(f'<br/><br/>________________________________<br/><b>CONTRATANTE</b><br/><b>{esc(d.get("razao_social","").upper())}</b>',center)]],colWidths=[8.4*cm,8.4*cm]); story.append(sig)
-    pdf.build(story,onFirstPage=header_footer,onLaterPages=header_footer)
-
-@app.route('/login',methods=['GET','POST'])
-def login():
- if request.method=='POST':
-  usuario=request.form.get('usuario','').strip(); senha=request.form.get('senha','')
-  c=con(); u=c.execute('select * from usuarios where usuario=? and ativo=1',(usuario,)).fetchone(); c.close()
-  if u and check_password_hash(u['senha_hash'],senha):
-   session.clear(); session['user_id']=u['id']; session['usuario']=u['usuario']; session['nome']=u['nome']; session['perfil']=u['perfil']
-   return redirect(request.args.get('next') or url_for('index'))
-  flash('Usuário ou senha inválidos.')
- return render_template('login.html')
-
-@app.route('/logout')
-def logout():
- session.clear(); return redirect(url_for('login'))
-
-@app.route('/usuarios',methods=['GET','POST'])
-@admin_required
-def usuarios():
- c=con()
- if request.method=='POST':
-  usuario=request.form.get('usuario','').strip(); nome=request.form.get('nome','').strip(); senha=request.form.get('senha',''); perfil=request.form.get('perfil','USUARIO')
-  if usuario and senha:
-   try: c.execute('insert into usuarios(usuario,nome,senha_hash,perfil,ativo) values(?,?,?,?,1)',(usuario,nome,generate_password_hash(senha),perfil)); c.commit(); flash('Usuário criado.')
-   except Exception: c.rollback(); flash('Não foi possível criar. Verifique se o usuário já existe.')
- rows=c.execute('select id,usuario,nome,perfil,ativo from usuarios order by usuario').fetchall(); c.close(); return render_template('usuarios.html',rows=rows)
-
-@app.route('/acesso/<int:id>',methods=['GET','POST'])
-@login_required
-def acesso(id):
-    c=con(); r=c.execute('select * from contratos where id=?',(id,)).fetchone(); c.close()
-    if not r: return 'Contrato não encontrado',404
-    if request.method=='POST':
-        if request.form.get('senha')==ACTION_PASSWORD:
-            ids=session.get('authorized_contracts',[])
-            if id not in ids: ids.append(id)
-            session['authorized_contracts']=ids
-            return redirect(url_for('detalhe',id=id))
-        flash('Senha incorreta.')
-    return render_template('acesso.html',r=r)
-
-@app.route('/status/<int:id>',methods=['POST'])
-@login_required
-def atualizar_status(id):
-    guard=protect(id)
-    if guard:return guard
-    status=request.form.get('status','').strip()
-    if status not in STATUS_OPTS: flash('Status inválido.'); return redirect(url_for('detalhe',id=id))
-    c=con(); c.execute('update contratos set status=? where id=?',(status,id)); c.commit(); c.close(); flash('Status atualizado.'); return redirect(url_for('detalhe',id=id))
-
-@app.route('/')
-@login_required
-def index():
- c=con(); rows=c.execute('select * from contratos order by id desc').fetchall(); c.close()
- rows=[dict(r) for r in rows]
- counts={s:0 for s in STATUS_OPTS}
- for r in rows: counts[r.get('status') or 'PENDENTE']=counts.get(r.get('status') or 'PENDENTE',0)+1
- kpis={'total':len(rows),'pendente':counts.get('PENDENTE',0),'elaboracao':counts.get('EM ELABORAÇÃO',0),'assinatura':counts.get('AGUARDANDO ASSINATURA',0),'ativo':counts.get('ATIVO',0),'cancelado':counts.get('CANCELADO',0)}
- now=datetime.now()
- for r in rows:
-  try:
-   dt=datetime.fromisoformat(r.get('criado_em') or '')
-   r['dias']=max(0,(now-dt).days); r['data_br']=dt.strftime('%d/%m/%Y')
-  except:
-   r['dias']=0; r['data_br']=r.get('criado_em') or '-'
- atencao=[r for r in rows if r.get('status') not in ('ATIVO','CANCELADO')]
- atencao=sorted(atencao,key=lambda x:x.get('dias',0),reverse=True)[:6]
- recentes=rows[:8]
- branch={'ECO CAMPO GRANDE':0,'ECO CUIABA':0,'ECONORTE':0}
- for r in rows:
-  f=(r.get('faturado_por') or '').upper()
-  if 'CAMPO' in f: branch['ECO CAMPO GRANDE']+=1
-  elif 'NORTE' in f or 'SINOP' in f: branch['ECONORTE']+=1
-  elif 'CUIABA' in f or 'CUIABÁ' in f: branch['ECO CUIABA']+=1
- mx=max(branch.values()) if branch and max(branch.values()) else 1
- filiais=[{'nome':k,'total':v,'pct':round(v/mx*100)} for k,v in branch.items()]
- months=[]
- for i in range(11,-1,-1):
-  y=now.year; m=now.month-i
-  while m<=0: m+=12; y-=1
-  months.append((y,m))
- month_counts={x:0 for x in months}
- for r in rows:
-  try:
-   d=datetime.fromisoformat(r.get('criado_em') or ''); key=(d.year,d.month)
-   if key in month_counts: month_counts[key]+=1
-  except: pass
- meses=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
- month_chart={'labels':[f'{meses[m-1]}/{str(y)[2:]}' for y,m in months],'values':[month_counts[x] for x in months]}
- status_order=['PENDENTE','EM ELABORAÇÃO','CONTRATO GERADO','AGUARDANDO ASSINATURA','ATIVO','CANCELADO']
- status_chart={'labels':[x.title() for x in status_order],'values':[counts.get(x,0) for x in status_order]}
- return render_template('index.html',kpis=kpis,atencao=atencao,recentes=recentes,filiais=filiais,status_chart=status_chart,month_chart=month_chart)
-@app.route('/novo',methods=['GET','POST'])
-@login_required
-def novo():
- if request.method=='GET': return render_template('importar.html')
- f=request.files.get('arquivo');
- if not f: flash('Selecione a CAPA.xlsx'); return redirect(url_for('novo'))
- p=UP/f.filename; f.save(p)
- try:d,o=read_capa(p)
- except Exception as e: flash('Erro ao ler CAPA: '+str(e)); return redirect(url_for('novo'))
- return render_template('form.html',d=d,o=o,form_action=url_for('salvar'),button_text='Salvar como pendência',editing=False)
-@app.route('/salvar',methods=['POST'])
-@login_required
-def salvar():
- d={k:request.form.get(k,'').strip() for k in FIELDS}; c=con(); rr=c.execute('select count(*) as total from contratos').fetchone(); n=rr['total']+1; chave=f'CT-{datetime.now().year}-{n:04d}'; cols=['chave','status','criado_em']+FIELDS; vals=[chave,'PENDENTE',datetime.now().isoformat(timespec='seconds')]+[d[k] for k in FIELDS]; c.execute(f"insert into contratos ({','.join(cols)}) values ({','.join(['?']*len(cols))})",vals); c.commit(); c.close(); flash(f'{chave} salvo em Pendências.'); return redirect(url_for('pendencias'))
-@app.route('/pendencias')
-@login_required
-def pendencias():
- filters={k:request.args.get(k,'').strip() for k in ('q','inicio','fim','mes','ano','status','filial')}
- clauses=[]; params=[]
- if filters['q']:
-  clauses.append('(LOWER(razao_social) LIKE ? OR LOWER(cpf_cnpj) LIKE ? OR LOWER(chave) LIKE ?)')
-  params.extend(['%'+filters['q'].lower()+'%']*3)
- if filters['inicio']: clauses.append('substr(criado_em,1,10)>=?'); params.append(filters['inicio'])
- if filters['fim']: clauses.append('substr(criado_em,1,10)<=?'); params.append(filters['fim'])
- if filters['mes'] in [str(i) for i in range(1,13)]: clauses.append('substr(criado_em,6,2)=?'); params.append(filters['mes'].zfill(2))
- if filters['ano'].isdigit() and len(filters['ano'])==4: clauses.append('substr(criado_em,1,4)=?'); params.append(filters['ano'])
- if filters['status']: clauses.append('status=?'); params.append(filters['status'])
- if filters['filial']: clauses.append('faturado_por=?'); params.append(filters['filial'])
- sql='SELECT * FROM contratos'+(' WHERE '+' AND '.join(clauses) if clauses else '')+' ORDER BY id DESC'
- c=con(); rows=c.execute(sql,tuple(params)).fetchall(); c.close()
- return render_template('pendencias.html',rows=rows,filters=filters,status_opts=STATUS_OPTS)
-@app.route('/contrato/<int:id>')
-@login_required
-def detalhe(id):
- guard=protect(id)
- if guard:return guard
- c=con(); r=c.execute('select * from contratos where id=?',(id,)).fetchone(); c.close(); return render_template('detalhe.html',r=r,status_opts=STATUS_OPTS)
-@app.route('/editar/<int:id>',methods=['GET','POST'])
-@login_required
-def editar(id):
- guard=protect(id)
- if guard:return guard
- c=con(); r=c.execute('select * from contratos where id=?',(id,)).fetchone(); c.close()
- if not r:return 'Contrato não encontrado',404
- if request.method=='POST':
-  d={k:request.form.get(k,'').strip() for k in FIELDS}; c=con(); sets=','.join([f'"{k}"=?' for k in FIELDS]); c.execute(f'update contratos set {sets} where id=?',[d[k] for k in FIELDS]+[id]); c.commit(); c.close(); flash('Cadastro atualizado com sucesso.'); return redirect(url_for('detalhe',id=id))
- # opções vêm do mesmo modelo oficial da CAPA
- try:
-  _,o=read_capa(BASE/'CAPA_MODELO.xlsx')
- except Exception:
-  o={'pagamento':['PRAZO DE PAGAMENTO','DIA PARA PAGAMENTO','DIA PARA PAGAMENTO FORA DO MÊS'],'filial':['ECONORTE','ECO CUIABA','ECO CAMPO GRANDE'],'representante':['FLÁVIO','VILA','MARCIA'],'mtr':['CLIENTE EMITE','ECO EMITE'],'cond':['SIM','NÃO'],'cor':[],'periodicidade':[],'embalagem':[],'categoria':[],'faturamento':[]}
- return render_template('form.html',d=dict(r),o=o,form_action=url_for('editar',id=id),button_text='Salvar alterações',editing=True)
-
-@app.route('/gerar/word/<int:id>')
-@login_required
-def gerar_word(id):
- guard=protect(id)
- if guard:return guard
- c=con(); r=c.execute('select * from contratos where id=?',(id,)).fetchone(); c.close(); p=OUT/f"{r['chave']}_CONTRATO.docx"; build_doc_v4(r,p); c=con(); c.execute("update contratos set status='CONTRATO GERADO' where id=?",(id,)); c.commit(); c.close(); return send_file(p,as_attachment=True,download_name=p.name)
-@app.route('/gerar/pdf/<int:id>')
-@login_required
-def gerar_pdf(id):
- guard=protect(id)
- if guard:return guard
- c=con(); r=c.execute('select * from contratos where id=?',(id,)).fetchone(); c.close(); pdf=OUT/f"{r['chave']}_CONTRATO.pdf"; build_pdf_v4(r,pdf); c=con(); c.execute("update contratos set status='CONTRATO GERADO' where id=?",(id,)); c.commit(); c.close(); return send_file(pdf,as_attachment=True,download_name=pdf.name,mimetype='application/pdf')
-
-
-# ----------------- MODULO DE RESCISOES (V9) -----------------
-RESCISAO_STATUS=['PENDENTE','EM ELABORAÇÃO','RESCISÃO GERADA','AGUARDANDO ASSINATURA','RESCINDIDO','CANCELADO']
-RESCISAO_CAMPOS=['filial','cliente','cnpj','ie','endereco','cidade','uf','cep','representante','rg','cpf','data_contrato','data_notificacao','data_encerramento','data_assinatura','motivo','observacoes']
-RESCISAO_FILIAIS={'campo_grande':'Campo Grande / MS','cuiaba':'Cuiabá / MT','sinop':'Sinop / MT'}
-RESCISAO_MODELOS={'campo_grande':'rescisao_campo_grande.docx','cuiaba':'rescisao_cuiaba.docx','sinop':'rescisao_sinop.docx'}
-RESCISAO_CLIENTES_MODELO={'campo_grande':'RAVIERA E-MOBILITY LTDA','cuiaba':'POSTO ALDO MARINGA LTDA','sinop':'MECANICA E AUTO ELETRICA CAVERZAN LTDA'}
-
-def _data_extenso(x):
- try:
-  d=date.fromisoformat(x)
-  return f'{d.day:02d} de {("janeiro fevereiro março abril maio junho julho agosto setembro outubro novembro dezembro").split()[d.month-1]} de {d.year}'
- except Exception:return x or '___ de __________ de ______'
-
-def _rescisao_doc(r):
- """Preserva o DOCX original por filial, substituindo dados variáveis em seus parágrafos."""
- filial=r['filial']; doc=Document(str(BASE/RESCISAO_MODELOS[filial]))
- cliente=r['cliente'].strip(); antigo=RESCISAO_CLIENTES_MODELO[filial]
- # Textos identificadores e endereços dos clientes-modelo; não modificar os dados fixos das filiais.
- old_clients={
- 'campo_grande':['RAVIERA E-MOBILITY LTDA','CAMPO GRANDE, Estado de Mato Grosso do Sul, na AV CORONEL ANTONINO, nº 513 - Bairro CORONEL ANTONINO - CEP: 79.022-000','52.012.765/0004-98','28.487.640-2','Willian Atallah','3039389 SSP/SP','036.597.128-68'],
- 'cuiaba':['POSTO ALDO MARINGA LTDA','RONDONOPOLIS, Estado de Mato Grosso, na ROD BR364 - SALA 01, nº S/N - Bairro PARQUE INDUSTRIAL VETORASSO - CEP: 78746-060','09.428.424/0002-07','14.075.466-0','Romerito Pereira de Almeida','011.709.811-6'],
- 'sinop':['MECANICA E AUTO ELETRICA CAVERZAN LTDA','Lucas do Rio Verde, Estado de Mato Grosso, na Rua Matrinxa nº: 4691 w, Bairro Loteamento Industrial V','31.304.795/0001-55','13.735.100-3']}
- import re
- replacements=[(antigo,cliente)]
- vals=old_clients[filial]
- if len(vals)>1: replacements.append((vals[1],f"{r['cidade']}, {r['uf']}, {r['endereco']}" + (f", CEP {r['cep']}" if r['cep'] else '')))
- if len(vals)>2:replacements.append((vals[2],r['cnpj']))
- if len(vals)>3:replacements.append((vals[3],r['ie']))
- if len(vals)>4:replacements.append((vals[4],r['representante']))
- if len(vals)>5:replacements.append((vals[5],r['rg'] if filial=='campo_grande' else r['cpf']))
- if len(vals)>6:replacements.append((vals[6],r['cpf']))
- # Regulariza datas de encerramento, data do instrumento e assinatura com base nos campos do formulário.
- all_paragraphs=list(doc.paragraphs)
- for table in doc.tables:
-  for row in table.rows:
-   for cell in row.cells:all_paragraphs.extend(cell.paragraphs)
- for paragraph in all_paragraphs:
-  if not paragraph.runs:continue
-  original=''.join(run.text for run in paragraph.runs)
-  changed=original
-  for a,b in replacements:
-   changed=re.sub(re.escape(a),lambda m:b or '',changed,flags=re.IGNORECASE)
-  if 'notificou a CONTRATADA' in changed and r['data_contrato']:
-   changed=re.sub(r'(firmado entre as partes)\s+.*?(?=\s+resolve celebrar)',lambda m:m.group(1)+' em '+_data_extenso(r['data_contrato']),changed,flags=re.IGNORECASE)
-  if 'encerrará em' in changed.lower() and r['data_encerramento']:
-   changed=re.sub(r'(encerrará em)\s+[^.\n]*',lambda m:m.group(1)+' '+_data_extenso(r['data_encerramento']),changed,flags=re.IGNORECASE)
-  if ((' – ' in changed or ', MT –' in changed) and ('de 2026' in changed or 'de 2025' in changed)) and r['data_assinatura']:
-   if changed.strip().startswith(('Campo Grande','Cuiaba','Sinop')):
-    changed=f"{RESCISAO_FILIAIS[filial].replace(' / ', ' – ')}, {_data_extenso(r['data_assinatura'])}."
-  if changed!=original:
-   paragraph.runs[0].text=changed
-   for run in paragraph.runs[1:]:run.text=''
- return doc
-
-def _rescisao_pdf(r,path):
- from reportlab.platypus import SimpleDocTemplate,Paragraph,Spacer,Image,Table,TableStyle,KeepTogether
- from reportlab.lib.styles import getSampleStyleSheet,ParagraphStyle
- from reportlab.lib.enums import TA_JUSTIFY,TA_CENTER
- from reportlab.lib import colors
- from reportlab.lib.units import cm
- from xml.sax.saxutils import escape
- filial=r['filial']; empresa={'sinop':'ECOSUPPLY RECICLADORA DO NORTE LTDA','campo_grande':'ECOSUPPLY RECICLADORA LTDA','cuiaba':'ECOSUPPLY RECICLADORA LTDA'}[filial]
- fd={'campo_grande':('Campo Grande','MS','Av. Cônsul Assaf Trad, 2739, Coronel Antonino, CEP 79013-545','10.533.843/0001-07','28.350.688-1'), 'cuiaba':('Cuiabá','MT','Rua Paulo Masayuki Uezato, S/N, Quadra Ind. 7, Lotes 22 a 24, Distrito Industrial, CEP 78098-400','10.533.843/0002-98','13.432.014-0'), 'sinop':('Sinop','MT','Estrada Municipal Castanheira, S/N, Lote 01 Quadra 11, Bairro Lídia','62.463.190/0001-30','14.145.716-3')}[filial]
- sty=getSampleStyleSheet(); sty.add(ParagraphStyle(name='resbody',fontName='Helvetica',fontSize=10,leading=15,alignment=TA_JUSTIFY,spaceAfter=12));sty.add(ParagraphStyle(name='restitle',parent=sty['resbody'],fontName='Helvetica-Bold',alignment=TA_CENTER,spaceAfter=16));sty.add(ParagraphStyle(name='reshead',parent=sty['resbody'],fontName='Helvetica-Bold',spaceBefore=12));sty.add(ParagraphStyle(name='rescenter',parent=sty['resbody'],alignment=TA_CENTER))
- e=lambda x:escape(str(x or ''))
- story=[]
- logo=BASE/'static/logo_ecosupply.png'
- if logo.exists():story.append(Image(str(logo),width=5.3*cm,height=1.25*cm,kind='proportional'))
- story.append(Paragraph(f'<b>{e(empresa)}</b><br/>{e(fd[2])}<br/>{e(fd[0])} - {e(fd[1])}<br/>CNPJ: {fd[3]} | IE: {fd[4]}',sty['rescenter']))
- story.append(Spacer(1,20))
- story.append(Paragraph(f'RESCISÃO DE CONTRATO DE PRESTAÇÃO DE SERVIÇO DE RETIRADA, DECOMPOSIÇÃO, TRATAMENTO E DESCARTE DE RESÍDUO FIRMADO ENTRE {e(empresa)} E {e(r["cliente"])}',sty['restitle']))
- body=[f'Pelo presente instrumento particular e na melhor forma de direito, de um lado:',f'<b>{e(r["cliente"])}</b>, pessoa jurídica de direito privado com sede em {e(r["cidade"])} - {e(r["uf"])}, {e(r["endereco"])}, CEP {e(r["cep"])}, inscrita no CNPJ sob nº {e(r["cnpj"])} e Inscrição Estadual nº {e(r["ie"])}'+(f', neste ato representada por {e(r["representante"])}, RG nº {e(r["rg"])}, CPF nº {e(r["cpf"])}' if r['representante'] else '')+', doravante denominada CONTRATANTE.',f'<b>{e(empresa)}</b>, com sede em {e(fd[0])}, {e(fd[1])}, {e(fd[2])}, CNPJ nº {fd[3]} e Inscrição Estadual nº {fd[4]}, doravante denominada CONTRATADA.',f'Considerando que a CONTRATANTE notificou a CONTRATADA com antecedência de 30 (trinta) dias, conforme previsão contratual aplicável, sobre a intenção de rescindir o contrato firmado em {_data_extenso(r["data_contrato"])}, as partes celebram a presente rescisão.', '<b>CLÁUSULA PRIMEIRA – DO OBJETO</b>',f'O Contrato de Prestação de Serviços de Retirada, Decomposição, Tratamento e Descarte encerrará em {_data_extenso(r["data_encerramento"])}.','Caso haja resíduos remanescentes, estes serão coletados no momento da retirada dos tambores. Havendo a referida coleta, será devida a última mensalidade correspondente aos serviços prestados.','<b>CLÁUSULA SEGUNDA – DA RESPONSABILIDADE</b>','As responsabilidades das partes em relação ao contrato se extinguem com a assinatura deste instrumento, ressalvadas as responsabilidades perante terceiros, notadamente ambientais, pelos atos praticados durante sua vigência, nos termos da legislação aplicável.','<b>ENCERRAMENTO</b>',f'As partes elegem o foro da Comarca de {e(fd[0])}/{e(fd[1])} para dirimir questões decorrentes deste instrumento.','<b>CLÁUSULA DE RESCISÃO</b>','Eventuais resíduos remanescentes serão coletados pela CONTRATADA no momento da retirada dos tambores. Havendo coleta, será devida a última mensalidade correspondente aos serviços prestados.',f'{e(fd[0])} – {e(fd[1])}, {_data_extenso(r["data_assinatura"])}.']
- for line in body:story.append(Paragraph(line,sty['resbody']))
- story.append(Spacer(1,24));story.append(Paragraph('________________________________          ________________________________',sty['rescenter']));story.append(Paragraph(f'CONTRATADA: {e(empresa)}<br/>CONTRATANTE: {e(r["cliente"])}',sty['rescenter']))
- SimpleDocTemplate(str(path),pagesize=(21*cm,29.7*cm),leftMargin=2*cm,rightMargin=2*cm,topMargin=1.8*cm,bottomMargin=1.8*cm).build(story)
-
-@app.route('/rescisoes')
-@login_required
-def rescisoes():
- filters={k:request.args.get(k,'').strip() for k in ('q','inicio','fim','mes','ano','status','filial')}
- clauses=[]; params=[]
- if filters['q']:
-  clauses.append('(LOWER(cliente) LIKE ? OR LOWER(cnpj) LIKE ? OR LOWER(chave) LIKE ?)'); params.extend(['%'+filters['q'].lower()+'%']*3)
- if filters['inicio']: clauses.append('substr(criado_em,1,10)>=?'); params.append(filters['inicio'])
- if filters['fim']: clauses.append('substr(criado_em,1,10)<=?'); params.append(filters['fim'])
- if filters['mes'] in [str(i) for i in range(1,13)]: clauses.append('substr(criado_em,6,2)=?'); params.append(filters['mes'].zfill(2))
- if filters['ano'].isdigit() and len(filters['ano'])==4: clauses.append('substr(criado_em,1,4)=?'); params.append(filters['ano'])
- if filters['status']: clauses.append('status=?'); params.append(filters['status'])
- if filters['filial']: clauses.append('filial=?'); params.append(filters['filial'])
- sql='SELECT * FROM rescisoes'+(' WHERE '+' AND '.join(clauses) if clauses else '')+' ORDER BY id DESC'
- c=con(); rows=c.execute(sql,tuple(params)).fetchall(); c.close()
- return render_template('rescisoes.html',rows=rows,status_opts=RESCISAO_STATUS,filters=filters)
-
-@app.route('/rescisoes/nova',methods=['GET','POST'])
-@login_required
-def rescisao_nova():
- if request.method=='POST':
-  d={k:request.form.get(k,'').strip() for k in RESCISAO_CAMPOS}
-  if d['filial'] not in RESCISAO_FILIAIS or not d['cliente'] or not d['cnpj'] or not d['data_encerramento']:
-   flash('Preencha filial, razão social, CNPJ e data de encerramento.');return render_template('rescisao_form.html',d=d,filiais=RESCISAO_FILIAIS,action=url_for('rescisao_nova'))
-  c=con(); now=datetime.now().isoformat(timespec='seconds'); chave='RC-'+str(datetime.now().year)+'-'+datetime.now().strftime('%m%d%H%M%S%f')[-11:]
-  cols=['chave','status','criado_em','atualizado_em','criado_por']+RESCISAO_CAMPOS
-  vals=[chave,'PENDENTE',now,now,session.get('usuario','')]+[d[k] for k in RESCISAO_CAMPOS]
-  c.execute(f"INSERT INTO rescisoes ({','.join(cols)}) VALUES ({','.join(['?']*len(cols))})",vals);c.commit();c.close();flash('Rescisão cadastrada.');return redirect(url_for('rescisoes'))
- return render_template('rescisao_form.html',d={},filiais=RESCISAO_FILIAIS,action=url_for('rescisao_nova'))
-
-@app.route('/rescisoes/<int:id>/editar',methods=['GET','POST'])
-@login_required
-def rescisao_editar(id):
- c=con();r=c.execute('SELECT * FROM rescisoes WHERE id=?',(id,)).fetchone()
- if not r:c.close();return 'Rescisão não encontrada',404
- if request.method=='POST':
-  if request.form.get('senha_acoes')!=ACTION_PASSWORD:
-   c.close();flash('Senha de ações incorreta.');return redirect(url_for('rescisoes'))
-  d={k:request.form.get(k,'').strip() for k in RESCISAO_CAMPOS}
-  if d['filial'] not in RESCISAO_FILIAIS or not d['cliente'] or not d['cnpj'] or not d['data_encerramento']:
-   c.close();flash('Dados obrigatórios ausentes.');return redirect(url_for('rescisao_editar',id=id))
-  c.execute('UPDATE rescisoes SET '+','.join(f'{k}=?' for k in RESCISAO_CAMPOS)+', atualizado_em=? WHERE id=?',[d[k] for k in RESCISAO_CAMPOS]+[datetime.now().isoformat(timespec='seconds'),id]);c.commit();c.close();flash('Rescisão atualizada.');return redirect(url_for('rescisoes'))
- c.close();return render_template('rescisao_form.html',d=dict(r),filiais=RESCISAO_FILIAIS,action=url_for('rescisao_editar',id=id),editing=True)
-
-@app.route('/rescisoes/<int:id>/status',methods=['POST'])
-@login_required
-def rescisao_status(id):
- if request.form.get('senha_acoes')!=ACTION_PASSWORD:flash('Senha de ações incorreta.');return redirect(url_for('rescisoes'))
- status=request.form.get('status')
- if status not in RESCISAO_STATUS:flash('Status inválido.');return redirect(url_for('rescisoes'))
- c=con();c.execute('UPDATE rescisoes SET status=?, atualizado_em=? WHERE id=?',(status,datetime.now().isoformat(timespec='seconds'),id));c.commit();c.close();return redirect(url_for('rescisoes'))
-
-@app.route('/rescisoes/<int:id>/gerar/<tipo>',methods=['POST'])
-@login_required
-def rescisao_gerar(id,tipo):
- if request.form.get('senha_acoes')!=ACTION_PASSWORD:flash('Senha de ações incorreta.');return redirect(url_for('rescisoes'))
- if tipo not in ('word','pdf'):return 'Formato inválido',400
- c=con();r=c.execute('SELECT * FROM rescisoes WHERE id=?',(id,)).fetchone()
- if not r:c.close();return 'Rescisão não encontrada',404
- filename=re.sub(r'[^a-zA-Z0-9_-]','_',r['chave'])+'_RESCISAO.'+('docx' if tipo=='word' else 'pdf');path=OUT/filename
- if tipo=='word':_rescisao_doc(r).save(str(path))
- else:_rescisao_pdf(r,path)
- if r['status'] in ('PENDENTE','EM ELABORAÇÃO'):
-  c.execute('UPDATE rescisoes SET status=?, atualizado_em=? WHERE id=?',('RESCISÃO GERADA',datetime.now().isoformat(timespec='seconds'),id));c.commit()
- c.close();return send_file(path,as_attachment=True,download_name=filename)
-
-if __name__=='__main__': app.run(debug=False,host='0.0.0.0',port=int(os.getenv('PORT','5000')))
+if __name__ == '__main__':
+    configure()
+    token=os.environ.get('SISGR_TOKEN','').strip() or getpass.getpass('Token SISGR (oculto; somente em memória): ').strip()
+    if token.lower().startswith('bearer '):token=token[7:].strip()
+    if not token or any(c in token for c in '\r\n'):raise SystemExit('Token inválido.')
+    print('Ecosupply API v1.10. Abra http://127.0.0.1:8051 no navegador e use o acesso criado. Mantenha este terminal aberto.')
+    create_app(token=token).run(host='127.0.0.1', port=8051, debug=False)

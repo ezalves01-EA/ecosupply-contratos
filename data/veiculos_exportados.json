@@ -1,0 +1,367 @@
+{
+  "source": "exportacao_veiculos30-10-26(2).xls",
+  "exportedAt": "2026-10-30",
+  "sourceSha256": "7736b18c6fd27a23c85d8b74e67c633a968373e0b594a186df4a9d21269f5a15",
+  "vehicles": [
+    {
+      "id": "63",
+      "place_number": "ATU-9D41",
+      "vehicle_type": "GRANELEIRO"
+    },
+    {
+      "id": "116",
+      "place_number": "ATU-9D41",
+      "vehicle_type": "GRANELEIRO"
+    },
+    {
+      "id": "32",
+      "place_number": "AYZ-3D58",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "5",
+      "place_number": "AZV-4778",
+      "vehicle_type": "VEICULO"
+    },
+    {
+      "id": "10",
+      "place_number": "BAC-4J44",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "48",
+      "place_number": "BSF-9449",
+      "vehicle_type": "JULIETA"
+    },
+    {
+      "id": "111",
+      "place_number": "BWI-2594",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "104",
+      "place_number": "DAH-7763",
+      "vehicle_type": "BAU GRANDE"
+    },
+    {
+      "id": "113",
+      "place_number": "DAH-7763",
+      "vehicle_type": "BAU GRANDE"
+    },
+    {
+      "id": "1",
+      "place_number": "FAI-1I63",
+      "vehicle_type": "JULIETA"
+    },
+    {
+      "id": "100",
+      "place_number": "FDC-0G04",
+      "vehicle_type": "HIDROVÁCUO"
+    },
+    {
+      "id": "60",
+      "place_number": "FGT-7J46",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "53",
+      "place_number": "FXF-7536",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "61",
+      "place_number": "GEX-8H01",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "47",
+      "place_number": "GGQ-3A91",
+      "vehicle_type": "JULIETA"
+    },
+    {
+      "id": "99",
+      "place_number": "HTP-0B45",
+      "vehicle_type": "BAU PEQUENO"
+    },
+    {
+      "id": "94",
+      "place_number": "HTP-0171",
+      "vehicle_type": "BAU PEQUENO"
+    },
+    {
+      "id": "105",
+      "place_number": "HTP-0171",
+      "vehicle_type": "BAU PEQUENO"
+    },
+    {
+      "id": "112",
+      "place_number": "HTP-0171",
+      "vehicle_type": "BAU PEQUENO"
+    },
+    {
+      "id": "97",
+      "place_number": "HTP-0178",
+      "vehicle_type": "HIDROVÁCUO"
+    },
+    {
+      "id": "89",
+      "place_number": "HTP-0B45",
+      "vehicle_type": "BAU PEQUENO"
+    },
+    {
+      "id": "90",
+      "place_number": "HTP-5239",
+      "vehicle_type": "BAU GRANDE"
+    },
+    {
+      "id": "95",
+      "place_number": "HTP-5239",
+      "vehicle_type": "BAU GRANDE"
+    },
+    {
+      "id": "75",
+      "place_number": "IUA-5G70",
+      "vehicle_type": "CARRETA"
+    },
+    {
+      "id": "4",
+      "place_number": "KNJ-6A65",
+      "vehicle_type": "HIDROVÁCUO"
+    },
+    {
+      "id": "37",
+      "place_number": "LRA-4E29",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "66",
+      "place_number": "MHJ-5I69",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "80",
+      "place_number": "NCG-5F63",
+      "vehicle_type": "HIDROVÁCUO"
+    },
+    {
+      "id": "6",
+      "place_number": "NFT-6C91",
+      "vehicle_type": "JULIETA"
+    },
+    {
+      "id": "9",
+      "place_number": "NPH-9709",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "103",
+      "place_number": "NRZ-0E95",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "44",
+      "place_number": "OAY-1251",
+      "vehicle_type": "JULIETA"
+    },
+    {
+      "id": "62",
+      "place_number": "OBG-7538",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "84",
+      "place_number": "OBK-9C54",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "2",
+      "place_number": "OFP-9206",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "109",
+      "place_number": "OOM-9366",
+      "vehicle_type": "BAU GRANDE"
+    },
+    {
+      "id": "24",
+      "place_number": "QBT-2931",
+      "vehicle_type": "MOTO"
+    },
+    {
+      "id": "79",
+      "place_number": "QBX-2219",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "15",
+      "place_number": "QCE-4F84",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "19",
+      "place_number": "QCG-6G68",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "20",
+      "place_number": "QCG-7H08",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "23",
+      "place_number": "QCK-1D21",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "7",
+      "place_number": "QCT-1B55",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "45",
+      "place_number": "RAK-1H42",
+      "vehicle_type": "JULIETA"
+    },
+    {
+      "id": "78",
+      "place_number": "RAQ-2B18",
+      "vehicle_type": "CARRETA"
+    },
+    {
+      "id": "28",
+      "place_number": "RAR-0F04",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "46",
+      "place_number": "RAT-8A45",
+      "vehicle_type": "JULIETA"
+    },
+    {
+      "id": "38",
+      "place_number": "RAV-9G17",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "67",
+      "place_number": "RAY-1G93",
+      "vehicle_type": "CARRETA"
+    },
+    {
+      "id": "77",
+      "place_number": "RAZ-0B17",
+      "vehicle_type": "HIDROVÁCUO"
+    },
+    {
+      "id": "49",
+      "place_number": "RAZ-5H53",
+      "vehicle_type": "JULIETA"
+    },
+    {
+      "id": "41",
+      "place_number": "ROG-3E33",
+      "vehicle_type": "HIDROVÁCUO"
+    },
+    {
+      "id": "42",
+      "place_number": "ROH-1D92",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "71",
+      "place_number": "ROH-4I72",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "52",
+      "place_number": "RRJ-7E47",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "50",
+      "place_number": "RRM-2G43",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "55",
+      "place_number": "RRQ-7B55",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "107",
+      "place_number": "RWA-8E05",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "86",
+      "place_number": "RWE-2C57",
+      "vehicle_type": "HIDROVÁCUO"
+    },
+    {
+      "id": "74",
+      "place_number": "SFD-9E95",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "72",
+      "place_number": "SFD-9E97",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "76",
+      "place_number": "SJL-3C64",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "92",
+      "place_number": "SJR-6F37",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "73",
+      "place_number": "SJX-9I03",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "108",
+      "place_number": "SMF-3E08",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "83",
+      "place_number": "SPI-5G07",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "106",
+      "place_number": "SUL-9E04",
+      "vehicle_type": "BAU PEQUENO"
+    },
+    {
+      "id": "101",
+      "place_number": "THD-5I05",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "81",
+      "place_number": "TMC-5A34",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "82",
+      "place_number": "TMD-1I32",
+      "vehicle_type": "GRANELEIRO/BAU"
+    },
+    {
+      "id": "114",
+      "place_number": "UOO-8I31",
+      "vehicle_type": "ROLLON"
+    },
+    {
+      "id": "115",
+      "place_number": "UOT-4D65",
+      "vehicle_type": "ROLLON"
+    }
+  ]
+}
