@@ -1,0 +1,14 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const nodes={};const node=id=>nodes[id]??={value:'',checked:false,hidden:false,innerHTML:'',textContent:''};
+let blob;
+const context={extensionEvents:()=>{},console,Blob,URL:{createObjectURL:b=>(blob=b,'blob:test'),revokeObjectURL:()=>{}},setTimeout:()=>{},currentView:'reagendar',filtered:[],rows:[],DATA:{meta:{selectedMonth:'2026-11',periodStart:'2026-11-01'}},esc:s=>String(s),document:{getElementById:node,querySelectorAll:()=>[],createElement:()=>({click(){}})}};
+vm.createContext(context);vm.runInContext(fs.readFileSync(__dirname+'/web/reschedule.js','utf8'),context);
+context.rows=[{id:1,date:'2026-11-01',status:'ROTA',city:'Sinop',point:'A',driver:'João'},{id:2,date:'2026-11-02',status:'EFETIVADO',city:'Sinop',point:'B',driver:'João'},{id:3,date:'2026-11-03',status:'ROTA',city:'Cuiabá',point:'C',driver:'Ana'}];context.filtered=context.rows;
+vm.runInContext('rescheduleEvents();renderReschedule()',context);
+assert.equal(vm.runInContext('pendingReschedules().length',context),2);
+node('reSelectAll').onclick();assert.equal(vm.runInContext('reSelected.size',context),2);
+context.filtered=[context.rows[0]];vm.runInContext('renderReschedule()',context);assert.equal(vm.runInContext('reSelected.size',context),2);
+node('reDate').value='2026-11-24';node('reReason').value='Ajuste';node('reLeft').value='s';node('reConfirm').checked=true;node('reExport').onclick();assert(blob);assert(node('reMessage').textContent.includes('Nenhuma alteração'));
+vm.runInContext('clearRescheduleSelection()',context);assert.equal(vm.runInContext('reSelected.size',context),0);
+node('reIds').value='2';node('rePaste').onclick();assert.equal(vm.runInContext('reSelected.size',context),0);
+console.log('Reagendamento: somente ROTA, seleção entre filtros, plano local e limpeza validados.');

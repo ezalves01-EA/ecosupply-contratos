@@ -190,3 +190,23 @@ class HostedTests(unittest.TestCase):
   self.assertIn('data-view="atualizar"',html)
   self.assertIn('.sync-box{display:none}',css)
   self.assertIn('.view-atualizar .sync-box{display:block}',css)
+
+class RescheduleDownloadTests(Server):
+ def test_download_requires_login_and_serves_archive(self):
+  self.assertEqual(self.client.get('/executor-local.zip').status_code,401)
+  response=self.client.get('/executor-local.zip',headers=self.headers)
+  self.assertEqual(response.status_code,200);self.assertTrue(response.data.startswith(b'PK'))
+  self.assertIn('attachment',response.headers['Content-Disposition']);response.close()
+ def test_reschedule_script_served(self):
+  response=self.client.get('/reschedule.js',headers=self.headers)
+  self.assertEqual(response.status_code,200);self.assertIn(b'ecosupply-reschedule-plan',response.data);response.close()
+
+class ExtensionAssetsTests(Server):
+ def test_extension_archive_and_script_require_auth(self):
+  for path in ['/sisgr-extension.zip','/extension.js']:
+   self.assertEqual(self.client.get(path).status_code,401)
+   response=self.client.get(path,headers=self.headers)
+   self.assertEqual(response.status_code,200)
+   if path.endswith('.zip'):self.assertTrue(response.data.startswith(b'PK'))
+   else:self.assertIn(b'ECOSUPPLY_EXTENSION_REQUEST',response.data)
+   response.close()

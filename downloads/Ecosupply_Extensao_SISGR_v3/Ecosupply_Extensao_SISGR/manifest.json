@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Ecosupply — Lotes SISGR",
+  "description": "Executa lotes revisados do painel na sua aba SISGR autenticada.",
+  "version": "1.2.0",
+  "minimum_chrome_version": "114",
+  "permissions": [
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://ecosupply.sisgr.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Abrir conferência do lote Ecosupply"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://ecosupply-logistica-api.onrender.com/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

@@ -1,0 +1,746 @@
+{
+  "source": "Ecosupply_Base_Unificada_Rotas_MT_Com_Regiao(2).xlsx",
+  "sourceSha256": "af9b2ccacd1216d0d40271f9ab8fc38de503df804554fc271cdd9aae5bc27826",
+  "rows": [
+    {
+      "city": "Acorizal",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 2,
+      "frequency": "Mensal",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_2"
+    },
+    {
+      "city": "Alto Araguaia",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 4,
+      "frequency": "Quadrimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Sul / Sudeste",
+      "route": "DAH-7H63_4"
+    },
+    {
+      "city": "Alto Boa Vista",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Alto Garças",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 4,
+      "frequency": "Quadrimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Sul / Sudeste",
+      "route": "DAH-7H63_4"
+    },
+    {
+      "city": "Alto Paraguai",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 1,
+      "frequency": "Bimestral",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_1"
+    },
+    {
+      "city": "Alto Taquari",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 4,
+      "frequency": "Quadrimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Sul / Sudeste",
+      "route": "DAH-7H63_4"
+    },
+    {
+      "city": "Araputanga",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 1,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Oeste / Fronteira",
+      "route": "DAH-7H63_1"
+    },
+    {
+      "city": "Arenápolis",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 2,
+      "frequency": "Bimestral",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_2"
+    },
+    {
+      "city": "Barra do Bugres",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 2,
+      "frequency": "Mensal",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_2"
+    },
+    {
+      "city": "Campinápolis",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Confresa",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Porto Alegre do Norte",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Vila Rica",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Campo Novo do Parecis",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 1,
+      "frequency": "Mensal",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_1"
+    },
+    {
+      "city": "Campo Verde",
+      "uf": "MT",
+      "truck": "SFD-9E95",
+      "week": 2,
+      "frequency": "Mensal",
+      "document": "Fonte: SFD-9E95.pdf",
+      "region": "Sul / Sudeste",
+      "route": "SFD-9E95_2"
+    },
+    {
+      "city": "Campos de Júlio",
+      "uf": "MT",
+      "truck": "SJR-6F37",
+      "week": 2,
+      "frequency": "Mensal",
+      "document": "Fonte: SJR-GRANELEIRO.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "SJR-6F37_2"
+    },
+    {
+      "city": "Barra do Garças",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Mensal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Bom Jesus do Araguaia",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Mensal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Comodoro",
+      "uf": "MT",
+      "truck": "SJR-6F37",
+      "week": 2,
+      "frequency": "Bimestral",
+      "document": "Fonte: SJR-GRANELEIRO.pdf",
+      "region": "Oeste / Fronteira",
+      "route": "SJR-6F37_2"
+    },
+    {
+      "city": "Bom Jesus do Araguaia",
+      "uf": "MT",
+      "truck": "SFD-9E95",
+      "week": 3,
+      "frequency": "Mensal",
+      "document": "Fonte: SFD-9E95.pdf",
+      "region": "Leste / Araguaia",
+      "route": "SFD-9E95_3"
+    },
+    {
+      "city": "Cáceres",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 1,
+      "frequency": "Mensal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Oeste / Fronteira",
+      "route": "DAH-7H63_1"
+    },
+    {
+      "city": "Denise",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 2,
+      "frequency": "Trimestral",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_2"
+    },
+    {
+      "city": "Diamantino",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 1,
+      "frequency": "Mensal",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_1"
+    },
+    {
+      "city": "Diamantino",
+      "uf": "MT",
+      "truck": "SFD-9E95",
+      "week": 1,
+      "frequency": "Mensal",
+      "document": "Fonte: SFD-9E95.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "SFD-9E95_1"
+    },
+    {
+      "city": "Canarana",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Mensal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Figueirópolis d’Oeste",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 1,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Oeste / Fronteira",
+      "route": "DAH-7H63_1"
+    },
+    {
+      "city": "Canarana",
+      "uf": "MT",
+      "truck": "SFD-9E95",
+      "week": 3,
+      "frequency": "Mensal",
+      "document": "Fonte: SFD-9E95.pdf",
+      "region": "Leste / Araguaia",
+      "route": "SFD-9E95_3"
+    },
+    {
+      "city": "General Carneiro",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Sul / Sudeste",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Glória d’Oeste",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 1,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Oeste / Fronteira",
+      "route": "DAH-7H63_1"
+    },
+    {
+      "city": "Indiavaí",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 1,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Oeste / Fronteira",
+      "route": "DAH-7H63_1"
+    },
+    {
+      "city": "Itiquira",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 2,
+      "frequency": "Mensal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Sul / Sudeste",
+      "route": "DAH-7H63_2"
+    },
+    {
+      "city": "Jaciara",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 2,
+      "frequency": "Mensal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Sul / Sudeste",
+      "route": "DAH-7H63_2"
+    },
+    {
+      "city": "Jangada",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 2,
+      "frequency": "Mensal",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_2"
+    },
+    {
+      "city": "Jauru",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 1,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Oeste / Fronteira",
+      "route": "DAH-7H63_1"
+    },
+    {
+      "city": "Juscimeira",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 2,
+      "frequency": "Mensal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Sul / Sudeste",
+      "route": "DAH-7H63_2"
+    },
+    {
+      "city": "Mirassol d’Oeste",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 1,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Oeste / Fronteira",
+      "route": "DAH-7H63_1"
+    },
+    {
+      "city": "Nobres",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 1,
+      "frequency": "Mensal",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_1"
+    },
+    {
+      "city": "Nortelândia",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 2,
+      "frequency": "Bimestral",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_2"
+    },
+    {
+      "city": "Nova Lacerda",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 1,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Oeste / Fronteira",
+      "route": "DAH-7H63_1"
+    },
+    {
+      "city": "Nova Marilândia",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 2,
+      "frequency": "Mensal",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_2"
+    },
+    {
+      "city": "Nova Maringá",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 1,
+      "frequency": "Bimestral",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_1"
+    },
+    {
+      "city": "Nova Olímpia",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 2,
+      "frequency": "Bimestral",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_2"
+    },
+    {
+      "city": "Gaúcha do Norte",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Mensal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Nova Xavantina",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Mensal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Poconé",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 1,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Pantanal",
+      "route": "DAH-7H63_1"
+    },
+    {
+      "city": "Pontes e Lacerda",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 1,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Oeste / Fronteira",
+      "route": "DAH-7H63_1"
+    },
+    {
+      "city": "Paranatinga",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Mensal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Porto Esperidião",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 1,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Oeste / Fronteira",
+      "route": "DAH-7H63_1"
+    },
+    {
+      "city": "Primavera do Leste",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Mensal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Sul / Sudeste",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Querência",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Mensal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Ribeirão Cascalheira",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Mensal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Rondonópolis",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 2,
+      "frequency": "Quinzenal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Sul / Sudeste",
+      "route": "DAH-7H63_2"
+    },
+    {
+      "city": "Rosário Oeste",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 1,
+      "frequency": "Mensal",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_1"
+    },
+    {
+      "city": "Santo Afonso",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 2,
+      "frequency": "Bimestral",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_2"
+    },
+    {
+      "city": "Sapezal",
+      "uf": "MT",
+      "truck": "SJR-6F37",
+      "week": 1,
+      "frequency": "Quinzenal",
+      "document": "Fonte: SJR-GRANELEIRO.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "SJR-6F37_1"
+    },
+    {
+      "city": "Água Boa",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Mensal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "São José do Rio Claro",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 1,
+      "frequency": "Mensal",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_1"
+    },
+    {
+      "city": "Espigão do Leste",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Semestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "São José dos Quatro Marcos",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 1,
+      "frequency": "Bimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Oeste / Fronteira",
+      "route": "DAH-7H63_1"
+    },
+    {
+      "city": "Tangará da Serra",
+      "uf": "MT",
+      "truck": "OOM-9D66",
+      "week": 2,
+      "frequency": "Mensal",
+      "document": "Fonte: OOM9D66.pdf",
+      "region": "Médio-Norte / Parecis",
+      "route": "OOM-9D66_2"
+    },
+    {
+      "city": "Vila Bela da Santíssima Trindade",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 1,
+      "frequency": "Quadrimestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Oeste / Fronteira",
+      "route": "DAH-7H63_1"
+    },
+    {
+      "city": "São Félix do Araguaia",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Semestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "São José do Xingu",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 3,
+      "frequency": "Semestral",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Leste / Araguaia",
+      "route": "DAH-7H63_3"
+    },
+    {
+      "city": "Cerejeiras",
+      "uf": "RO",
+      "truck": "SJR-6F37",
+      "week": 2,
+      "frequency": "Quadrimestral",
+      "document": "Fonte: SJR-GRANELEIRO.pdf",
+      "region": "Fora de MT / Rondônia",
+      "route": "SJR-6F37_2"
+    },
+    {
+      "city": "Vilhena",
+      "uf": "RO",
+      "truck": "SJR-6F37",
+      "week": 2,
+      "frequency": "Quadrimestral",
+      "document": "Fonte: SJR-GRANELEIRO.pdf",
+      "region": "Fora de MT / Rondônia",
+      "route": "SJR-6F37_2"
+    },
+    {
+      "city": "Rondonópolis",
+      "uf": "MT",
+      "truck": "DAH-7H63",
+      "week": 4,
+      "frequency": "Quinzenal",
+      "document": "Fonte: DAH7763.pdf",
+      "region": "Sul / Sudeste",
+      "route": "DAH-7H63_4"
+    },
+    {
+      "city": "CUIABA",
+      "uf": "MT",
+      "truck": "HTP-0171",
+      "week": 1,
+      "frequency": "SEMANAL",
+      "document": null,
+      "region": "CAPITAL",
+      "route": "HTP-0171_1"
+    },
+    {
+      "city": "VARZEA GRANDE",
+      "uf": "MT",
+      "truck": "HTP-0B45",
+      "week": 1,
+      "frequency": "SEMANAL",
+      "document": null,
+      "region": "CAPITAL",
+      "route": "HTP-0B45_1"
+    },
+    {
+      "city": "CUIABA",
+      "uf": "MT",
+      "truck": "HTP-0171",
+      "week": 2,
+      "frequency": "SEMANAL",
+      "document": null,
+      "region": "CAPITAL",
+      "route": "HTP-0171_2"
+    },
+    {
+      "city": "VARZEA GRANDE",
+      "uf": "MT",
+      "truck": "HTP-0B45",
+      "week": 2,
+      "frequency": "SEMANAL",
+      "document": null,
+      "region": "CAPITAL",
+      "route": "HTP-0B45_2"
+    },
+    {
+      "city": "CUIABA",
+      "uf": "MT",
+      "truck": "HTP-0171",
+      "week": 3,
+      "frequency": "SEMANAL",
+      "document": null,
+      "region": "CAPITAL",
+      "route": "HTP-0171_3"
+    },
+    {
+      "city": "VARZEA GRANDE",
+      "uf": "MT",
+      "truck": "HTP-0B45",
+      "week": 3,
+      "frequency": "SEMANAL",
+      "document": null,
+      "region": "CAPITAL",
+      "route": "HTP-0B45_3"
+    },
+    {
+      "city": "CUIABA",
+      "uf": "MT",
+      "truck": "HTP-0171",
+      "week": 4,
+      "frequency": "SEMANAL",
+      "document": null,
+      "region": "CAPITAL",
+      "route": "HTP-0171_4"
+    },
+    {
+      "city": "VARZEA GRANDE",
+      "uf": "MT",
+      "truck": "HTP-0B45",
+      "week": 4,
+      "frequency": "SEMANAL",
+      "document": null,
+      "region": "CAPITAL",
+      "route": "HTP-0B45_4"
+    }
+  ]
+}

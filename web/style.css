@@ -20,3 +20,28 @@
 .sync-box{display:none}.view-atualizar .sync-box{display:block}.view-atualizar .filters,.view-atualizar #kpis,.view-atualizar .status-section,.view-atualizar .completion-section,.view-atualizar #overviewPanels,.view-atualizar .heading-actions,.view-atualizar #filterMessage{display:none}
 
 .month-choice{display:flex;align-items:center;gap:12px;margin:12px 0;font-size:13px}.month-choice select{padding:9px;border:1px solid #dce7e5;border-radius:6px;background:white}
+
+.view-reagendar #overviewPanels,.view-reagendar #kpis,.view-reagendar .completion-section,.view-reagendar .status-section,.view-reagendar .heading-actions:not(#reschedulePanel .heading-actions){display:none}.re-body{padding:20px}.re-body>p{font-size:12px;line-height:1.7;color:#607585}.re-body label{display:flex;flex-direction:column;gap:7px;font-size:12px;margin:12px 0}.re-body input:not([type=checkbox]),.re-body select,.re-body textarea{padding:10px;border:1px solid #dce7e5;border-radius:5px;max-width:100%}.re-body .re-confirm{flex-direction:row;align-items:center}.re-body .table-wrap{max-height:450px;overflow:auto}.re-body #reReview{max-height:160px;overflow:auto}
+.route-layout{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:20px;margin:20px 0}.route-layout .table-wrap{max-height:560px;overflow:auto}#plannedRouteMap{display:block;width:100%;height:430px}.route-cell{width:100%;min-width:120px;padding:12px;border:1px solid #dce7e5;border-radius:6px;background:#fff;color:#16394b;cursor:pointer;text-align:left}.route-cell small{display:block;margin-top:6px;color:#617985}.route-cell.active{background:#e6f5f1;border-color:#078184}.route-unassigned{padding:16px;margin-bottom:22px}.route-unassigned summary{cursor:pointer;font-size:13px}.route-unassigned .table-wrap{max-height:360px;overflow:auto}#routePlanningPanel .kpis{grid-template-columns:repeat(4,minmax(0,1fr))}@media(max-width:900px){.route-layout{grid-template-columns:1fr}#routePlanningPanel .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Quadro de roteiros: azul alinhado ao painel Ecosupply. */
+#routeMatrix table{border-collapse:separate;border-spacing:0;width:100%;border:1px solid #d2e0ef;border-radius:9px;overflow:hidden}
+#routeMatrix thead{background:#153d63;color:#fff}
+#routeMatrix th{background:#153d63;color:#fff;font-weight:650;padding:15px 12px}
+#routeMatrix td{padding:12px;border-bottom:1px solid #dce7f2}
+#routeMatrix tbody tr:nth-child(even){background:#f2f6fc}
+#routeMatrix tbody td:first-child{font-weight:700;color:#234e76;background:#e9f0fa}
+#routeMatrix .route-cell{background:#edf4fc;color:#153d63;border:1px solid #c3d7ed;border-radius:7px;box-shadow:0 1px 2px #153d6308;transition:background .15s,border-color .15s}
+#routeMatrix .route-cell:hover{background:#dceafd;border-color:#688fb9}
+#routeMatrix .route-cell.active{background:#245c90;color:#fff;border-color:#174571;box-shadow:inset 3px 0 #78cce0}
+#routeMatrix .route-cell.active small{color:#e3efff}
+
+.view-auditoria #overviewPanels,.view-auditoria .completion-section,.view-auditoria .status-section{display:none!important}#auditRows{max-height:650px;overflow:auto}#auditPanel .kpis{grid-template-columns:repeat(4,minmax(0,1fr))}
+
+.view-rotalote #overviewPanels,.view-rotalote .status-section,.view-rotalote .completion-section{display:none!important}
+
+.view-rotaconclusao #overviewPanels,.view-rotaconclusao .status-section,.view-rotaconclusao .completion-section{display:none!important}#sisgrCompletionKpis{grid-template-columns:repeat(auto-fit,minmax(155px,1fr))}#sisgrCompletionRows,#sisgrCompletionDetail{max-height:550px;overflow:auto}#sisgrCompletionPanel .panel{margin-bottom:20px} .filters{flex-wrap:wrap}
+
+.sidebar{overflow-y:auto}.sidebar-bottom{flex-shrink:0}
+
+.view-recorrencialote #overviewPanels,.view-recorrencialote .status-section,.view-recorrencialote .completion-section,.view-recorrencialote .filters,.view-recorrencialote #kpis{display:none!important}

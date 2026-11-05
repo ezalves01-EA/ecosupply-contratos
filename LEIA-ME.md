@@ -122,3 +122,30 @@ O cabeçalho informa quais quinzenas foram carregadas, cargas parciais e última
 A automática permanece no mês corrente completo, às 00h e 11h de Brasília. Não dispara duas cargas históricas de uma vez: conclua uma quinzena antes de iniciar a outra. A divisão reduz o tamanho de cada operação, mas não garante menos consultas ao carregar as duas metades.
 
 Deploy: substitua os arquivos pelo conteúdo v1.10, preserve DATABASE_PATH e disco, mantenha AUTO_SYNC=1 e um worker, faça deploy e Ctrl+F5. Não há nova variável.
+
+## v1.11 — quinzena manual no mês atual e mudança de mês por ID
+Mês completo, 1ª e 2ª quinzenas agora podem ser escolhidos manualmente também no mês corrente. A automática continua no mês corrente completo às 00h e 11h de Brasília.
+
+A gravação substitui apenas as datas consultadas. Exceção: se a resposta trouxer um ID de agendamento já salvo em outro mês, o registro desse ID é removido do mês antigo e atualizado no mês de destino. As demais linhas e a data da última carga do mês antigo são preservadas; contagens auxiliares são recalculadas. Tudo ocorre na mesma transação SQLite; falha ou resposta inválida não aplica a mudança.
+
+A mudança entre meses só é confirmada quando o mês/período de destino é consultado e a API devolve o mesmo ID com a nova data. Não há consulta individual de todos os IDs antigos para procurar mudanças em meses fora da carga. Se o SISGR gerar um ID novo, não se presume que seja o mesmo agendamento.
+
+Atualize os arquivos, mantenha disco e variáveis existentes, faça deploy e Ctrl+F5. Nenhuma variável nova.
+
+## v1.12 — visão Reagendamento em lote com executor local
+Menu com pendentes ROTA da base mensal, filtros já existentes de cidade/motorista/data e demais campos, busca, marcação individual, seleção do resultado filtrado e adição de IDs colados (somente pendentes nos filtros). Seleção mantida entre filtros, limpa ao trocar mês/base, limitada a 100. O resumo exibe todos os selecionados. Status é fixo ROTA nesta visão, ignorando o filtro de status geral.
+
+A tela baixa um plano JSON revisado, sem credenciais. O botão Baixar executor local fornece v3; extraia no computador e copie historico.sqlite da v2, se houver. Abra INICIAR_LOTE_DO_PAINEL e escolha o plano. O envio continua pela sessão Chrome do computador e exige conferência e confirmação local. O servidor Render não faz POST no SISGR.
+
+Após confirmar as novas datas no SISGR, sincronize os períodos de origem e destino para atualizar o painel com dados oficiais. Não há importação automática do relatório ou alteração otimista de status/data. O seletor de mês determina a base consultada; pendentes não carregados não aparecem.
+
+Deploy mantém disco e variáveis. Substitua arquivos, incluindo reschedule.js e downloads/Ecosupply_Executor_Painel_v3.zip. O download exige o login normal do painel. Não envie historico.sqlite, cookies ou resultados para o Git.
+
+## v1.13 — extensão para reagendar pela aba SISGR
+Inclui downloads/Ecosupply_Extensao_SISGR_v1.zip e web/extension.js. No menu de reagendamento, baixe a extensão, extraia, abra chrome://extensions (ou edge://extensions), habilite Modo do desenvolvedor e Carregar sem compactação; selecione a pasta com manifest.json. Depois recarregue painel e SISGR no mesmo perfil Chrome/Edge. Extensão não compatível com Firefox nesta versão.
+
+Painel integrado: https://ecosupply-logistica-api.onrender.com/. No menu, clique Conectar extensão. Selecione IDs e dados, marque a conferência e Enviar para conferência na extensão. Ela abre uma aba própria com os dados; confira, confirme e mantenha aberta até terminar. Os resultados aparecem no painel. Senha/cookies não são enviados ao Render. Cada ID/data tem intenção persistida no perfil antes do envio; erros e respostas incertas param o lote sem repetição automática.
+
+A versão ainda não foi validada em execução autenticada real. Comece com poucos IDs desejados. A data final deve ser conferida no SISGR. Atualize origem/destino pela sincronização para refletir dados oficiais. Histórico da extensão é separado do executor Python e de outros perfis/máquinas. Não rode o mesmo lote simultaneamente em perfis diferentes.
+
+Serviço e variáveis do Render continuam os mesmos. Substitua o pacote, incluindo downloads e web, e faça deploy. Usuários precisam instalar a extensão uma vez em seus computadores. Não remover o disco persistente.

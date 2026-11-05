@@ -9,7 +9,7 @@ class MonthTests(unittest.TestCase):
    db.execute('CREATE TABLE snapshot(id INTEGER PRIMARY KEY,payload TEXT)');db.execute('CREATE TABLE settings(name TEXT PRIMARY KEY,payload TEXT)')
   initialize(self.p)
  def tearDown(self):self.tmp.cleanup()
- def data(self,month,stamp):return {'rows':[{'id':1,'date':month+'-01'}],'meta':{'periodStart':month+'-01','periodEnd':month+'-28','importedAt':stamp,'transporterIds':['5']}}
+ def data(self,month,stamp):return {'rows':[{'id':int(month[-2:]),'date':month+'-01'}],'meta':{'periodStart':month+'-01','periodEnd':month+'-28','importedAt':stamp,'transporterIds':['5']}}
  def test_history_preserves_current_bytes_timestamp_and_auto_scope(self):
   with patch('month_store.current_month',return_value='2026-11'):
    save_month(self.p,self.data('2026-11','current'),'2026-11-01','2026-11-30',['5'])
@@ -55,3 +55,23 @@ class FortnightTests(unittest.TestCase):
   from month_store import merge_period
   for rows in [[(1,'2026-10-16',1)],[(1,'2026-10-01',1),(1,'2026-10-02',1)]]:
    with self.assertRaises(ValueError):merge_period({},self.part(rows,'a'),'2026-10-01','2026-10-15',['5'])
+
+class MovedMonthTests(MonthTests):
+ def test_incoming_id_moves_only_it_and_preserves_other_month_timestamp(self):
+  old={'rows':[{'id':10,'date':'2026-10-04','measures':{'KG':12}},{'id':20,'date':'2026-10-25','measures':{'KG':25}}],'meta':{'importedAt':'2026-10-31T12:00:00Z','quality':[]}}
+  save_month(self.p,old,'2026-10-01','2026-10-31',['5'])
+  with sqlite3.connect(self.p) as db:before=json.loads(db.execute("SELECT payload FROM monthly_snapshot WHERE month='2026-10'").fetchone()[0])
+  incoming={'rows':[{'id':10,'date':'2026-11-05','measures':{'KG':15}}],'meta':{'importedAt':'2026-11-02T12:00:00Z','quality':[]}}
+  save_month(self.p,incoming,'2026-11-01','2026-11-15',['5'])
+  with sqlite3.connect(self.p) as db:
+   after=json.loads(db.execute("SELECT payload FROM monthly_snapshot WHERE month='2026-10'").fetchone()[0]);new=json.loads(db.execute("SELECT payload FROM monthly_snapshot WHERE month='2026-11'").fetchone()[0])
+  self.assertEqual(after['rows'],[before['rows'][1]])
+  self.assertEqual(after['meta']['importedAt'],before['meta']['importedAt'])
+  self.assertEqual(after['meta']['dateCoverage'],before['meta']['dateCoverage'])
+  self.assertEqual(new['rows'][0]['id'],10)
+ def test_invalid_response_leaves_both_months_unchanged(self):
+  save_month(self.p,self.data('2026-10','old'),'2026-10-01','2026-10-31',['5'])
+  with sqlite3.connect(self.p) as db:before=db.execute('SELECT month,payload FROM monthly_snapshot').fetchall()
+  bad={'rows':[{'id':10,'date':'2026-12-01'}],'meta':{}}
+  with self.assertRaises(ValueError):save_month(self.p,bad,'2026-11-01','2026-11-15',['5'])
+  with sqlite3.connect(self.p) as db:self.assertEqual(before,db.execute('SELECT month,payload FROM monthly_snapshot').fetchall())

@@ -60,6 +60,22 @@ def save_month(path,data,start,end,transporters):
         previous=db.execute('SELECT payload FROM monthly_snapshot WHERE month=?',(month,)).fetchone()
         merged=merge_period(json.loads(previous[0]) if previous else {},data,start,end,transporters)
         db.execute('INSERT INTO monthly_snapshot VALUES(?,?) ON CONFLICT(month) DO UPDATE SET payload=excluded.payload',(month,json.dumps(merged,ensure_ascii=False,allow_nan=False)))
+        # Incoming IDs confirm a move. Touch only those records in other months.
+        incoming_ids={str(row['id']) for row in data.get('rows',[])}
+        for other_month,payload in db.execute('SELECT month,payload FROM monthly_snapshot WHERE month<>?',(month,)).fetchall():
+            other=json.loads(payload)
+            moved={str(row['id']) for row in other.get('rows',[]) if str(row['id']) in incoming_ids}
+            if not moved:continue
+            other['rows']=[row for row in other.get('rows',[]) if str(row['id']) not in moved]
+            meta=other.get('meta',{})
+            meta['quality']=[q for q in meta.get('quality',[]) if str(q.get('id')) not in moved]
+            meta.update(sourceRows=sum(row.get('sourceRows',0) for row in other['rows']),
+                volumePending=sum(bool(row.get('volumeIssues')) for row in other['rows']),
+                signatureUnknown=sum(row.get('signature') is None for row in other['rows']),
+                vehiclePending=sum(not row.get('plateConfirmed') for row in other['rows']),
+                vehicleExportRows=sum(str(row.get('plateSource','')).startswith('Exportação SISGR') for row in other['rows']))
+            # Preserve importedAt and coverage: this is an ID reconciliation, not a full refresh.
+            db.execute('UPDATE monthly_snapshot SET payload=? WHERE month=?',(json.dumps(other,ensure_ascii=False,allow_nan=False),other_month))
         if month==current_month() or not db.execute("SELECT 1 FROM settings WHERE name='auto_transporters'").fetchone():
             db.execute("INSERT INTO settings VALUES('auto_transporters',?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",(json.dumps(transporters),))
 
